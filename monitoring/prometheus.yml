@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # n8n main (web) node exposes prom-client metrics at /metrics.
+  # Watch nodejs_heap_size_used_bytes climb toward the 512MB cap.
+  - job_name: n8n-main
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["n8n-main:5678"]
+
+  # Worker metrics (previously blind spot). Watch the worker heap while a
+  # production execution builds a large array of items.
+  - job_name: n8n-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["n8n-worker:5678"]

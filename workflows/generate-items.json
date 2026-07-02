@@ -1,0 +1,42 @@
+{
+  "id": "genItemsLab00001",
+  "name": "generate-items",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "b1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [400, 300],
+      "webhookId": "generate-items-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build x items on the WORKER (production execution).\n// x comes from the query string: POST /webhook/generate?x=500000\nconst j = $input.first().json;\nconst x = Number(j.query?.x ?? j.body?.x ?? 1000);\nconst out = [];\nfor (let i = 0; i < x; i++) {\n  out.push({ json: { n: i, tag: 'item-' + i } });\n}\nreturn out;"
+      },
+      "id": "b1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Build Array",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Build Array", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}

@@ -1,0 +1,15 @@
+# Local secrets / config (use .env.example as the template)
+.env
+
+# Generated load-test payloads
+.oom-payload.bin
+*.bin
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Heap dumps from OOM investigation
+*.heapsnapshot

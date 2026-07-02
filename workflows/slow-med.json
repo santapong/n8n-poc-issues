@@ -1,0 +1,42 @@
+{
+  "id": "slowMedLab00000001",
+  "name": "slow-med",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slowmed",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "f1f2f3f4-0001-0001-0001-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [400, 300],
+      "webhookId": "slow-med-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ~5s CPU per job, so a queue of them is visible while workers (concurrency=1) drain.\nlet s = 0;\nfor (let i = 0; i < 1300000000; i++) { s += i % 7; }\nreturn [{ json: { done: true, s } }];"
+      },
+      "id": "f1f2f3f4-0002-0002-0002-000000000002",
+      "name": "Work",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Work", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}

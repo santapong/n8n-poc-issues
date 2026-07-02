@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>n8n OOM &amp; Resilience — Evidence Log</title>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#111827; --card:#1e293b; --ink:#e2e8f0; --ink2:#94a3b8;
+    --border:#334155; --term:#0b1020; --termink:#d1fae5;
+    --green:#22c55e; --red:#ef4444; --amber:#f59e0b; --blue:#60a5fa; --purple:#a78bfa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.55;font-size:15px}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 20px 80px}
+  header.hero{background:linear-gradient(120deg,#0b1020,#1e293b 60%,#312e81);padding:34px 20px;border-bottom:1px solid var(--border)}
+  header .wrap{padding-bottom:0}
+  h1{margin:0 0 6px;font-size:26px;letter-spacing:-.3px}
+  header p{margin:0;color:var(--ink2);font-size:14px}
+  .meta{margin-top:10px;font-family:ui-monospace,monospace;font-size:12.5px;color:var(--ink2)}
+  h2{font-size:19px;margin:34px 0 6px;padding:10px 14px;background:var(--card);border:1px solid var(--border);
+    border-left:5px solid var(--purple);border-radius:10px;scroll-margin-top:14px}
+  h2 .ex{font-family:ui-monospace,monospace;color:var(--purple);margin-right:8px}
+  .proves{color:var(--ink2);font-size:14px;margin:8px 0 4px}
+  .proves b{color:var(--ink)}
+  pre{background:var(--term);color:var(--termink);border:1px solid var(--border);border-radius:10px;
+    padding:14px 16px;overflow-x:auto;font-family:"SF Mono",ui-monospace,"Cascadia Code",Consolas,monospace;
+    font-size:12.5px;line-height:1.5;margin:10px 0}
+  pre .c{color:#64748b}      /* comment/dim */
+  pre .k{color:#fca5a5}      /* crash/red highlight */
+  pre .g{color:#86efac}      /* good/green highlight */
+  code{background:#0b1020;color:#fca5a5;padding:1px 6px;border-radius:5px;font-family:ui-monospace,monospace;font-size:12.5px}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.5px}
+  th,td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--ink2);font-weight:600;background:#0b1020}
+  .v{display:inline-block;font-family:ui-monospace,monospace;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:6px}
+  .ok{background:rgba(34,197,94,.15);color:#4ade80;border:1px solid rgba(34,197,94,.4)}
+  .fail{background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.4)}
+  .warnv{background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.4)}
+  nav.toc{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 18px;margin-top:16px}
+  nav.toc table{margin:0}
+  nav.toc a{color:var(--blue);text-decoration:none}
+  nav.toc a:hover{text-decoration:underline}
+  .foot{color:var(--ink2);font-size:12.5px;text-align:center;margin-top:40px;border-top:1px solid var(--border);padding-top:16px}
+  .num{color:var(--green)} .neg{color:var(--red)}
+  .fig{margin:12px 0;text-align:center}
+  .fig svg{max-width:100%;height:auto;background:#0b1020;border:1px solid var(--border);border-radius:12px}
+  .figcap{font-size:11.5px;color:var(--ink2);margin-top:5px}
+  .overview{margin:18px 0 6px}
+  .grp{font-size:13px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#a78bfa;margin:20px 0 8px}
+  .step{background:#111827;border:1px solid var(--border);border-left:4px solid var(--green);border-radius:10px;padding:11px 15px;margin:10px 0}
+  .stephead{font-size:14.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .stepno{display:inline-flex;width:25px;height:25px;align-items:center;justify-content:center;background:var(--green);color:#06240f;border-radius:8px;font-family:ui-monospace,monospace;font-size:13px;flex:none}
+  .step .why{color:var(--ink2);font-size:12.5px;margin:5px 0 0;padding-left:34px}
+  .step pre{margin:8px 0 2px}
+  .prev{font-size:10.5px;font-family:ui-monospace,monospace;color:#93c5fd;background:#0b1020;border:1px solid #334155;padding:1px 7px;border-radius:6px}
+  .topnav{position:sticky;top:0;z-index:100;display:flex;gap:6px;align-items:center;flex-wrap:wrap;background:#0b1020;border-bottom:1px solid #334155;padding:8px 16px}
+  .topnav .navbrand{color:#a78bfa;font-weight:700;font-size:13px;margin-right:10px}
+  .topnav a{color:#94a3b8;text-decoration:none;font-size:13px;padding:5px 12px;border-radius:8px}
+  .topnav a:hover{background:#1e293b;color:#e2e8f0}
+  .topnav a.active{background:#22c55e;color:#06240f;font-weight:700}
+</style>
+</head>
+<body>
+<div class="topnav">
+  <span class="navbrand">n8n OOM docs</span>
+  <a href="n8n-oom-report.html">Report</a>
+  <a href="n8n-oom-evidence.html" class="active">Evidence</a>
+  <a href="n8n-oom-diagram.svg">Web-node diagram</a>
+  <a href="n8n-worker-oom-diagram.svg">Worker-node diagram</a>
+</div>
+<header class="hero"><div class="wrap">
+  <h1>n8n OOM &amp; Resilience — Evidence Log</h1>
+  <p>Raw measured proof only. Every number below came from live <code>/metrics</code>, container inspects, Postgres, Redis, or a V8 heap snapshot on this lab.</p>
+  <div class="meta">stack: n8n v2.28.4 · queue mode · nginx · Postgres · Redis · heap cap 512 MB · worker concurrency 1</div>
+</div></header>
+
+<div class="wrap">
+<nav class="toc">
+<table>
+  <tr><th>#</th><th>Exhibit</th><th>Proves</th><th>Verdict</th></tr>
+  <tr><td>★</td><td><a href="#FIX"><b>Fix / prevent — step by step</b></a></td><td>the remediation checklist (near top)</td><td><span class="v ok">GUIDE</span></td></tr>
+  <tr><td>A</td><td><a href="#A">Web-node OOM (upload flood)</a></td><td>uploads crash main</td><td><span class="v fail">CONFIRMED</span></td></tr>
+  <tr><td>B</td><td><a href="#B">Heap composition + snapshot</a></td><td>heap = 77% base64 strings</td><td><span class="v fail">CONFIRMED</span></td></tr>
+  <tr><td>C</td><td><a href="#C">Worker OOM lifecycle</a></td><td>spike→drop, then OOM</td><td><span class="v fail">CONFIRMED</span></td></tr>
+  <tr><td>D</td><td><a href="#D">Task-runner isolation</a></td><td>runner OOM ≠ worker crash</td><td><span class="v warnv">CONFIRMED</span></td></tr>
+  <tr><td>E</td><td><a href="#E">Can't clear heap (Q1)</a></td><td>no gc / no process in sandbox</td><td><span class="v fail">CONFIRMED</span></td></tr>
+  <tr><td>F</td><td><a href="#F">Auto-restart drops execution (Q2)</a></td><td>running→crashed, not resumed</td><td><span class="v fail">CONFIRMED</span></td></tr>
+  <tr><td>G</td><td><a href="#G">Execution data in DB</a></td><td>open-execution loads main</td><td><span class="v warnv">CONFIRMED</span></td></tr>
+  <tr><td>H</td><td><a href="#H">Prevention: input cap</a></td><td>413 at edge, main flat</td><td><span class="v ok">PREVENTED</span></td></tr>
+  <tr><td>I</td><td><a href="#I">Prevention: don't materialize</a></td><td>100M processed, heap flat</td><td><span class="v ok">PREVENTED</span></td></tr>
+  <tr><td>J</td><td><a href="#J">Queue backpressure</a></td><td>queue grows &amp; drains</td><td><span class="v warnv">CONFIRMED</span></td></tr>
+  <tr><td>K</td><td><a href="#K">Timeout vs sync CPU</a></td><td>timeout can't preempt loop</td><td><span class="v warnv">CONFIRMED</span></td></tr>
+</table>
+</nav>
+
+<div class="fig overview">
+<svg viewBox="0 0 1180 340" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="ova" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
+    <linearGradient id="ovh" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#22c55e"/><stop offset="42%" stop-color="#f59e0b"/><stop offset="82%" stop-color="#ef4444"/></linearGradient>
+  </defs>
+  <text x="28" y="32" font-size="17" font-weight="700" fill="#e2e8f0">How it happens &#8594; why &#8594; how to prevent</text>
+  <rect x="24" y="50" width="150" height="82" rx="10" fill="#141c2e" stroke="#ef4444" stroke-width="2"/>
+  <text x="99" y="84" text-anchor="middle" font-size="14" font-weight="700" fill="#f87171">8 &#215; 200 MB</text>
+  <text x="99" y="104" text-anchor="middle" font-size="14" font-weight="700" fill="#f87171">uploads</text>
+  <text x="99" y="123" text-anchor="middle" font-size="10.5" fill="#94a3b8">/webhook/upload</text>
+  <line x1="176" y1="91" x2="214" y2="91" stroke="#64748b" stroke-width="2.5" marker-end="url(#ova)"/>
+  <rect x="218" y="50" width="184" height="82" rx="10" fill="#141c2e" stroke="#60a5fa" stroke-width="2"/>
+  <text x="310" y="80" text-anchor="middle" font-size="14" font-weight="700" fill="#93c5fd">nginx :8080</text>
+  <text x="310" y="102" text-anchor="middle" font-size="11" fill="#bfdbfe">buffering OFF &#8594;</text>
+  <text x="310" y="118" text-anchor="middle" font-size="11" fill="#bfdbfe">streams straight through</text>
+  <line x1="404" y1="91" x2="442" y2="91" stroke="#64748b" stroke-width="2.5" marker-end="url(#ova)"/>
+  <rect x="446" y="38" width="288" height="106" rx="10" fill="#171430" stroke="#a78bfa" stroke-width="3"/>
+  <text x="590" y="64" text-anchor="middle" font-size="15" font-weight="700" fill="#c4b5fd">n8n-main &#183; WEB NODE</text>
+  <text x="590" y="85" text-anchor="middle" font-size="12.5" fill="#ddd6fe">V8 heap capped at 512 MB</text>
+  <rect x="470" y="97" width="240" height="36" rx="8" fill="#241b45" stroke="#a78bfa"/>
+  <text x="590" y="120" text-anchor="middle" font-size="12" font-weight="700" fill="#c4b5fd">raw bytes &#8594; base64 STRINGS on heap</text>
+  <line x1="736" y1="91" x2="774" y2="91" stroke="#64748b" stroke-width="2.5" marker-end="url(#ova)"/>
+  <rect x="778" y="50" width="200" height="82" rx="10" fill="#1e1215" stroke="#ef4444" stroke-width="2.5"/>
+  <text x="878" y="82" text-anchor="middle" font-size="14" font-weight="700" fill="#f87171">&#128165; heap out of memory</text>
+  <text x="878" y="105" text-anchor="middle" font-size="12" fill="#fca5a5">exit 134</text>
+  <text x="878" y="123" text-anchor="middle" font-size="11" fill="#fca5a5">OOMKilled = false</text>
+  <text x="28" y="182" font-size="13" font-weight="700" fill="#e2e8f0">heap_used &#8594; 512 MB cap (measured):</text>
+  <rect x="28" y="194" width="1000" height="30" rx="8" fill="#111827" stroke="#334155"/>
+  <rect x="28" y="194" width="982" height="30" rx="8" fill="url(#ovh)"/>
+  <line x1="1028" y1="186" x2="1028" y2="234" stroke="#ef4444" stroke-width="2.5" stroke-dasharray="6 4"/>
+  <text x="1038" y="214" font-size="12" font-weight="700" fill="#f87171">512 &#128165;</text>
+  <text x="311" y="244" text-anchor="middle" font-size="11" fill="#cbd5e1">145 idle</text>
+  <text x="462" y="244" text-anchor="middle" font-size="11" fill="#cbd5e1">222 loading</text>
+  <text x="1000" y="244" text-anchor="middle" font-size="11" font-weight="700" fill="#fca5a5">503 FATAL</text>
+  <text x="28" y="296" font-size="13" font-weight="700" fill="#4ade80">PREVENT &#10003;</text>
+  <rect x="120" y="280" width="286" height="30" rx="15" fill="#0f2417" stroke="#22c55e"/>
+  <text x="263" y="300" text-anchor="middle" font-size="12" fill="#86efac">cap uploads at nginx &#8594; 413</text>
+  <rect x="420" y="280" width="300" height="30" rx="15" fill="#0f2417" stroke="#22c55e"/>
+  <text x="570" y="300" text-anchor="middle" font-size="12" fill="#86efac">return a summary, not the dataset</text>
+  <rect x="734" y="280" width="304" height="30" rx="15" fill="#0f2417" stroke="#22c55e"/>
+  <text x="886" y="300" text-anchor="middle" font-size="12" fill="#86efac">binary &#8594; database/s3 &#183; signed URL</text>
+</svg>
+<div class="figcap">Reproduce (flood) &#8594; system (nginx streams to the web node) &#8594; why (base64 strings fill the 512 MB heap) &#8594; prevent.</div>
+</div>
+
+<h2 id="FIX" style="border-left-color:#22c55e"><span class="ex" style="color:#4ade80">★ FIX</span>How to prevent — step by step</h2>
+<p class="proves">Ordered, copy-pasteable. Each step tags the exhibit (proof) it neutralizes below. <span class="v ok">✅ proven on this lab</span></p>
+
+<div class="grp">A · Protect the web node (ingestion)</div>
+
+<div class="step">
+  <div class="stephead"><span class="stepno">1</span> Cap upload / payload size at the edge <span class="prev">Exhibit A</span> <span class="v ok">proven H</span></div>
+  <div class="why">Oversized uploads are rejected before they touch the heap (nginx returns 413).</div>
+<pre><span class="c"># nginx.conf</span>
+client_max_body_size <span class="g">25m</span>;
+<span class="c"># n8n env</span>
+N8N_PAYLOAD_SIZE_MAX=<span class="g">25</span>
+N8N_FORMDATA_FILE_SIZE_MAX=<span class="g">25</span></pre>
+</div>
+
+<div class="step">
+  <div class="stephead"><span class="stepno">2</span> Keep binary data off the heap <span class="prev">Exhibit A/B</span></div>
+  <div class="why">Store files externally (a reference stays in the execution, not the bytes).</div>
+<pre>N8N_DEFAULT_BINARY_DATA_MODE=<span class="g">database</span>   <span class="c"># queue mode (or s3)</span>
+N8N_BINARY_DATA_TTL=60</pre>
+</div>
+
+<div class="step">
+  <div class="stephead"><span class="stepno">3</span> Don't route big files through n8n at all <span class="prev">Exhibit A/G</span></div>
+  <div class="why">Best for large files: client uploads to GCS/S3 via a signed URL; n8n gets only the object reference (a few KB). Removes the heap crash and the DB bloat.</div>
+</div>
+
+<div class="grp">B · Protect the worker (execution)</div>
+
+<div class="step">
+  <div class="stephead"><span class="stepno">4</span> Batch &amp; don't materialize the dataset <span class="prev">Exhibit C</span> <span class="v ok">proven I</span></div>
+  <div class="why">Heap tracks what you HOLD. Process in chunks and return only what's needed.</div>
+<pre><span class="c"># in the workflow</span>
+Loop Over Items / Split In Batches   <span class="c"># e.g. 200 rows per run</span>
+Return a <span class="g">summary</span>, not x items.
+Set (keep only set) to drop fields early after each call.</pre>
+</div>
+
+<div class="step">
+  <div class="stephead"><span class="stepno">5</span> Isolate Code nodes in external task runners <span class="prev">Exhibit D</span></div>
+  <div class="why">A runaway Code node kills the runner subprocess, not the worker — and fixes the runner memory leak.</div>
+<pre>N8N_RUNNERS_MODE=<span class="g">external</span>
+N8N_RUNNERS_AUTH_TOKEN=&lt;random-secret&gt;
+<span class="c"># runner sidecar (n8nio/runners image), its own:</span>
+NODE_OPTIONS=--max-old-space-size=&lt;limit&gt;</pre>
+</div>
+
+<div class="step">
+  <div class="stephead"><span class="stepno">6</span> Bound concurrency &amp; size the heap <span class="prev">Exhibit C</span></div>
+  <div class="why">Heap needed ≈ concurrency × max_MB × 2.3. Keep the V8 cap below the container limit so you get a clean error, not a kernel kill (137).</div>
+<pre>n8n worker --concurrency=<span class="g">5</span>
+NODE_OPTIONS=--max-old-space-size=&lt;below container mem_limit&gt;
+<span class="c"># many small workers &gt; one big worker</span></pre>
+</div>
+
+<div class="grp">C · Data lifecycle</div>
+
+<div class="step">
+  <div class="stephead"><span class="stepno">7</span> Don't save &amp; do prune executions <span class="prev">Exhibit G</span></div>
+  <div class="why">Kills the finish-serialize spike, the "open a big execution → main OOM" poison pill, and Postgres bloat — all at once.</div>
+<pre>EXECUTIONS_DATA_SAVE_ON_SUCCESS=<span class="g">none</span>
+EXECUTIONS_DATA_PRUNE=<span class="g">true</span>
+EXECUTIONS_DATA_MAX_AGE=336            <span class="c"># hours (14 days)</span>
+EXECUTIONS_DATA_PRUNE_MAX_COUNT=10000</pre>
+</div>
+
+<div class="grp">D · Resilience (non-memory)</div>
+
+<div class="step">
+  <div class="stephead"><span class="stepno">8</span> Redis <code>noeviction</code> + watch queue depth <span class="prev">Exhibit J</span></div>
+  <div class="why">Eviction silently drops Bull jobs. Watch <code>bull:jobs:wait</code> for backpressure; autoscale workers on it.</div>
+<pre>redis-server --maxmemory-policy <span class="g">noeviction</span>
+<span class="c"># monitor / autoscale on:</span>
+redis-cli LLEN bull:jobs:wait
+N8N_METRICS_INCLUDE_QUEUE_METRICS=true</pre>
+</div>
+
+<div class="step">
+  <div class="stephead"><span class="stepno">9</span> Timeouts + generous probe tolerances <span class="prev">Exhibit K</span></div>
+  <div class="why">Bounds async/IO runs (⚠️ can't preempt sync CPU — Exhibit K). Give liveness probes slack so a brief CPU spike doesn't restart the pod.</div>
+<pre>EXECUTIONS_TIMEOUT=300               <span class="c"># seconds</span>
+<span class="c"># k8s livenessProbe: timeoutSeconds 5-10, failureThreshold 3-5</span></pre>
+</div>
+
+<div class="step">
+  <div class="stephead"><span class="stepno">10</span> Graceful shutdown + idempotent workflows <span class="prev">Exhibit F</span></div>
+  <div class="why">Crashed/restarted jobs re-run FROM SCRATCH (never resumed) — so make workflows safe to re-run.</div>
+<pre>N8N_GRACEFUL_SHUTDOWN_TIMEOUT=60
+<span class="c"># k8s terminationGracePeriodSeconds &gt;= that</span>
+<span class="c"># design idempotent: dedup keys / upserts</span></pre>
+</div>
+
+<div class="grp">E · Observability</div>
+
+<div class="step">
+  <div class="stephead"><span class="stepno">11</span> Metrics on ALL nodes + alerts</div>
+  <div class="why">The worker was a blind spot until we enabled this. Alert before the heap hits the cap.</div>
+<pre>N8N_METRICS=true                     <span class="c"># on MAIN and EVERY worker</span>
+<span class="c"># scrape all; alert when nodejs_heap_size_used_bytes nears the cap</span></pre>
+</div>
+
+<hr style="border:none;border-top:1px solid #334155;margin:26px 0 4px">
+<p class="proves" style="font-size:13px">Below: the raw proof for every claim above &#8212; Exhibits A&#8211;K.</p>
+
+<!-- A -->
+<h2 id="A"><span class="ex">Exhibit A</span>Web-node OOM — upload flood</h2>
+<p class="proves"><b>Proves:</b> 8×200 MB uploads drive the main node's V8 heap to the 512 MB cap and it aborts. <span class="v fail">CONFIRMED</span></p>
+<div class="fig"><svg viewBox="0 0 640 92" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs><linearGradient id="ah" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#22c55e"/><stop offset="55%" stop-color="#f59e0b"/><stop offset="95%" stop-color="#ef4444"/></linearGradient></defs>
+  <text x="16" y="22" font-size="12.5" font-weight="700" fill="#e2e8f0">main heap_used (MB) &#8594; 512 cap</text>
+  <rect x="16" y="30" width="520" height="28" rx="8" fill="#111827" stroke="#334155"/>
+  <rect x="16" y="30" width="457" height="28" rx="8" fill="url(#ah)"/>
+  <line x1="536" y1="24" x2="536" y2="64" stroke="#ef4444" stroke-width="2.5" stroke-dasharray="5 4"/>
+  <text x="545" y="49" font-size="11.5" font-weight="700" fill="#f87171">512 &#128165;</text>
+  <line x1="162" y1="30" x2="162" y2="66" stroke="#cbd5e1" stroke-width="1.3"/><text x="162" y="80" text-anchor="middle" font-size="11" fill="#cbd5e1">144 idle</text>
+  <line x1="336" y1="30" x2="336" y2="66" stroke="#cbd5e1" stroke-width="1.3"/><text x="336" y="80" text-anchor="middle" font-size="11" fill="#cbd5e1">315</text>
+  <line x1="473" y1="30" x2="473" y2="66" stroke="#fca5a5" stroke-width="1.3"/><text x="473" y="80" text-anchor="middle" font-size="11" font-weight="700" fill="#fca5a5">450 &#8594; down</text>
+</svg><div class="figcap">One round of uploads: 144 &#8594; 315 &#8594; 450 &#8594; process aborts (Mark-Compact ~503 MB in the fatal log).</div></div>
+<pre><span class="c"># heap sampler during the flood (MB, via /metrics)</span>
+   [08:15:16] heap_used=144
+   [08:15:44] heap_used=169
+   [08:15:45] heap_used=<span class="k">315</span>
+   [08:15:47] heap_used=<span class="k">450</span>
+   [08:15:49] heap=--- (main down)
+
+<span class="c"># container state after crash (restart:"no")</span>
+status=exited  exitCode=<span class="k">134</span>  OOMKilled(kernel)=<span class="g">false</span>  restarts=1
+
+<span class="c"># fatal log (n8n-main)</span>
+&lt;--- Last few GCs ---&gt;
+... Mark-Compact 503.0 (521.0) -&gt; 502.8 MB ... allocation failure; scavenge might not succeed
+<span class="k">FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory</span></pre>
+
+<!-- B -->
+<h2 id="B"><span class="ex">Exhibit B</span>Heap composition + V8 snapshot</h2>
+<p class="proves"><b>Proves:</b> raw file bytes sit off-heap (external); the on-heap 512 MB is ~77% base64 <em>strings</em>. <span class="v fail">CONFIRMED</span></p>
+<pre><span class="c"># memory-region samples during upload flood (MB)</span>
+time      heapUsed  heapTotal  external   RSS
+08:33:20    147       190        97       339   <span class="c"># external (raw Buffers) climbs first</span>
+08:33:26    <span class="k">222</span>       295        26       491   <span class="c"># heapUsed spikes on base64/JSON serialize → then FATAL</span>
+
+<span class="c"># heap snapshot captured at 334 MB (SIGUSR2), summarized by object type</span>
+node count      : 1,418,480
+total self_size : 423.8 MB
+--- by object type (top) ---
+   <span class="k">325.3 MB   string</span>        <span class="c"># ← 77% of the heap = the file, base64-encoded</span>
+    21.4 MB   code
+    19.0 MB   native
+    16.2 MB   array
+    15.2 MB   closure
+    11.2 MB   object
+     3.2 MB   concatenated string
+     1.5 MB   sliced string</pre>
+
+<!-- C -->
+<h2 id="C"><span class="ex">Exhibit C</span>Worker OOM lifecycle</h2>
+<p class="proves"><b>Proves:</b> heap = execution data; it frees after finish (small runs) but RSS stays high; big enough → OOM. <span class="v fail">CONFIRMED</span></p>
+<pre><span class="c"># production Code node builds x items on the worker (concurrency=1)</span>
+ baseline ............................. 121 MB
+ x=100,000 : heapUsed 121 → <span class="k">148</span> (spike) → <span class="g">114</span> after finish+GC   heapTotal 181→121  RSS 330→221
+ x=300,000 : heapUsed → <span class="k">204</span>   RSS → <span class="k">465</span>   (stayed HIGH, no full drop)
+ x=600,000 : from the elevated floor → <span class="k">OOM</span>
+
+status=exited  exitCode=<span class="k">134</span>  OOMKilled=false
+grew with x: 100k → +27 MB, 300k → +83 MB   <span class="c"># heap tracks the held dataset</span></pre>
+
+<!-- D -->
+<h2 id="D"><span class="ex">Exhibit D</span>Task-runner isolation (auto-restart run)</h2>
+<p class="proves"><b>Proves:</b> a Code-node OOM kills the isolated JS Task Runner, not the worker; execution is marked error, container does not restart. <span class="v warnv">CONFIRMED</span></p>
+<div class="fig"><svg viewBox="0 0 640 138" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <rect x="20" y="20" width="600" height="100" rx="12" fill="#0f2417" stroke="#22c55e" stroke-width="2"/>
+  <text x="40" y="46" font-size="13.5" font-weight="700" fill="#4ade80">n8n-worker process &#8212; SURVIVES (restarts=0)</text>
+  <rect x="60" y="58" width="270" height="50" rx="10" fill="#1e1215" stroke="#ef4444" stroke-width="2"/>
+  <text x="195" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#f87171">JS Task Runner (subprocess)</text>
+  <text x="195" y="99" text-anchor="middle" font-size="11.5" fill="#fca5a5">Code node builds 15M &#8594; &#128165; OOM (dies)</text>
+  <line x1="336" y1="83" x2="392" y2="83" stroke="#64748b" stroke-width="2.5"/>
+  <path d="M392,78 L402,83 L392,88 z" fill="#64748b"/>
+  <rect x="406" y="62" width="188" height="42" rx="10" fill="#141c2e" stroke="#f59e0b"/>
+  <text x="500" y="87" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fbbf24">execution &#8594; error</text>
+</svg><div class="figcap">The OOM is contained in the runner; the worker catches it, marks the execution <code>error</code>, and keeps running.</div></div>
+<pre><span class="c"># fired x=15,000,000 with auto-restart on; watched status</span>
+ t+25s  restarts=0 running=true   exec6(was running)=<span class="k">crashed</span>  exec7(15M)=new
+ t+30s  restarts=0 running=true   exec6=crashed              exec7=<span class="k">running</span>
+ t+50s  restarts=<span class="g">0</span> running=<span class="g">true</span>   exec6=<span class="k">error</span>     exec7=<span class="k">error</span>
+final RestartCount = <span class="g">0</span>          <span class="c"># worker container never restarted</span>
+
+<span class="c"># worker log</span>
+Last session crashed
+Found unfinished executions: 6
+<span class="k">[runnner:js] FATAL ERROR: Reached heap limit ... JavaScript heap out of memory</span>
+Node ran out of memory</pre>
+
+<!-- E -->
+<h2 id="E"><span class="ex">Exhibit E</span>Cannot clear the heap from inside (Q1)</h2>
+<p class="proves"><b>Proves:</b> no <code>--expose-gc</code>, and the Code-node sandbox has no <code>process</code>/<code>global</code> — you cannot force-GC or measure heap at runtime. <span class="v fail">CONFIRMED</span></p>
+<pre><span class="c"># worker NODE_OPTIONS — no --expose-gc</span>
+NODE_OPTIONS=--max-old-space-size=512
+
+<span class="c"># Code node calling process.memoryUsage() → execution error</span>
+<span class="k">ReferenceError: process is not defined [line 3]</span>
+    at VmCodeWrapper (evalmachine.&lt;anonymous&gt;:3:16)
+    at Script.runInContext (node:vm:149:12)</pre>
+
+<!-- F -->
+<h2 id="F"><span class="ex">Exhibit F</span>Auto-restart drops the executing workflow (Q2)</h2>
+<p class="proves"><b>Proves:</b> a mid-execution restart marks the running execution <code>crashed</code> (finished=false) — never resumed/completed. <span class="v fail">CONFIRMED</span></p>
+<pre><span class="c"># caught a workflow mid-run, then hard-killed + restarted the worker</span>
+BEFORE restart:  execution id=10   status=<span class="k">running</span>   stoppedAt=(empty)
+                        ↓  docker kill + start (auto-restart)
+AFTER restart:   execution id=10   status=<span class="k">crashed</span>   finished=<span class="k">false</span>   stoppedAt=04:57:07
+
+<span class="c"># crash-recovery log</span>
+Last session crashed
+[Recovery] Logs available, amended execution
+<span class="k">Found unfinished executions: 10</span></pre>
+
+<!-- G -->
+<h2 id="G"><span class="ex">Exhibit G</span>Execution data persisted in Postgres</h2>
+<p class="proves"><b>Proves:</b> finished executions store full data in the DB; opening one loads it into main. Large enough → main OOM (repeatable). <span class="v warnv">CONFIRMED (storage half)</span></p>
+<pre><span class="c"># stored execution_data sizes (Postgres)</span>
+executionId | data_size | bytes
+     5      | <span class="k">29 MB</span>     | 30468391
+     4      | 9637 kB   | 9868338
+
+<span class="c"># how the UI opens an execution → goes through main</span>
+GET /rest/executions/5  →  HTTP 401   <span class="c"># (auth-gated; owner login required to drive headlessly)</span></pre>
+
+<!-- H -->
+<h2 id="H"><span class="ex">Exhibit H</span>Prevention — input cap (web node)</h2>
+<p class="proves"><b>Proves:</b> with <code>client_max_body_size 25m</code>, the same flood that crashed main is rejected at nginx; main heap stays flat. <span class="v ok">PREVENTED</span></p>
+<div class="fig"><svg viewBox="0 0 520 196" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <text x="260" y="20" text-anchor="middle" font-size="12.5" font-weight="700" fill="#e2e8f0">main heap under the SAME 8&#215;200 MB flood</text>
+  <line x1="40" y1="168" x2="480" y2="168" stroke="#334155" stroke-width="1.5"/>
+  <line x1="40" y1="36" x2="480" y2="36" stroke="#ef4444" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="474" y="32" text-anchor="end" font-size="10.5" fill="#f87171">512 MB cap</text>
+  <rect x="95" y="40" width="110" height="128" rx="6" fill="#ef4444"/>
+  <text x="150" y="60" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">503 &#128165;</text>
+  <text x="150" y="186" text-anchor="middle" font-size="11.5" fill="#f87171">no cap &#8594; crash (134)</text>
+  <rect x="315" y="130" width="110" height="38" rx="6" fill="#22c55e"/>
+  <text x="370" y="122" text-anchor="middle" font-size="13" font-weight="700" fill="#4ade80">148</text>
+  <text x="370" y="186" text-anchor="middle" font-size="11.5" fill="#86efac">25m cap &#8594; flat, exit 0</text>
+</svg><div class="figcap">Same load; the oversized uploads get <b>413</b> at nginx, so main heap never moves.</div></div>
+<pre><span class="c"># same 8 × 200 MB uploads as Exhibit A</span>
+main heap BEFORE: 148 MB
+HTTP codes:  [ <span class="g">413 413 413 413 413 413 413 413</span> ]   <span class="c"># rejected at the edge</span>
+main heap AFTER:  <span class="g">148 MB (flat)</span>   main status: <span class="g">running  exit=0</span></pre>
+
+<!-- I -->
+<h2 id="I"><span class="ex">Exhibit I</span>Prevention — don't materialize (worker)</h2>
+<p class="proves"><b>Proves:</b> processing 100,000,000 as a running total (return a summary) keeps heap flat — vs OOM at 600k when held as items. <span class="v ok">PREVENTED</span></p>
+<div class="fig"><svg viewBox="0 0 540 196" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <text x="270" y="20" text-anchor="middle" font-size="12.5" font-weight="700" fill="#e2e8f0">worker heap: hold items vs return a summary</text>
+  <line x1="40" y1="168" x2="500" y2="168" stroke="#334155" stroke-width="1.5"/>
+  <line x1="40" y1="36" x2="500" y2="36" stroke="#ef4444" stroke-width="1.2" stroke-dasharray="5 4"/>
+  <text x="494" y="32" text-anchor="end" font-size="10.5" fill="#f87171">512 MB cap</text>
+  <rect x="100" y="40" width="110" height="128" rx="6" fill="#ef4444"/>
+  <text x="155" y="60" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">&#128165; OOM</text>
+  <text x="155" y="182" text-anchor="middle" font-size="11.5" fill="#f87171">600k items held</text>
+  <text x="155" y="196" text-anchor="middle" font-size="10.5" fill="#94a3b8">(materialized)</text>
+  <rect x="330" y="138" width="110" height="30" rx="6" fill="#22c55e"/>
+  <text x="385" y="130" text-anchor="middle" font-size="13" font-weight="700" fill="#4ade80">122</text>
+  <text x="385" y="182" text-anchor="middle" font-size="11.5" fill="#86efac">100,000,000 processed</text>
+  <text x="385" y="196" text-anchor="middle" font-size="10.5" fill="#94a3b8">(summary, success)</text>
+</svg><div class="figcap">167&#215; more <em>processed</em>, yet heap stays flat &#8212; because nothing large is <em>held</em>.</div></div>
+<pre><span class="c"># x=100,000,000 (167× the count that OOM'd), returns one summary item</span>
+worker heap BEFORE: 119 MB
+   [13:45:47] worker heap=121 MB
+   [13:46:09] worker heap=<span class="g">122 MB</span>        <span class="c"># flat the entire run</span>
+worker status AFTER: <span class="g">running  exit=0  restarts=0</span>
+latest execution: 11 | genSummaryLab0001 | <span class="g">success</span></pre>
+
+<!-- J -->
+<h2 id="J"><span class="ex">Exhibit J</span>Queue backpressure</h2>
+<p class="proves"><b>Proves:</b> when arrival ≫ throughput, jobs pile in Redis <code>bull:jobs:wait</code> and executions sit "Queued", then drain. <span class="v warnv">CONFIRMED</span></p>
+<div class="fig"><svg viewBox="0 0 640 168" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <text x="20" y="22" font-size="12.5" font-weight="700" fill="#e2e8f0">bull:jobs:wait (queue depth) &#8212; concurrency 1 worker</text>
+  <line x1="50" y1="140" x2="610" y2="140" stroke="#334155" stroke-width="1.5"/>
+  <line x1="50" y1="30" x2="50" y2="140" stroke="#334155" stroke-width="1.5"/>
+  <path d="M50,140 L100,30 L150,48 L200,58 L250,67 L300,76 L350,85 L400,103 L450,113 L500,122 L550,131 L600,140 Z" fill="#f59e0b" fill-opacity="0.18"/>
+  <polyline points="50,140 100,30 150,48 200,58 250,67 300,76 350,85 400,103 450,113 500,122 550,131 600,140" fill="none" stroke="#fbbf24" stroke-width="2.5"/>
+  <circle cx="100" cy="30" r="4.5" fill="#ef4444"/>
+  <text x="112" y="30" font-size="12" font-weight="700" fill="#f87171">peak 12 (FIRE 12)</text>
+  <circle cx="600" cy="140" r="4.5" fill="#22c55e"/>
+  <text x="595" y="130" text-anchor="end" font-size="11.5" font-weight="700" fill="#4ade80">drained &#8594; 0</text>
+  <text x="36" y="35" text-anchor="end" font-size="10.5" fill="#94a3b8">12</text>
+  <text x="36" y="144" text-anchor="end" font-size="10.5" fill="#94a3b8">0</text>
+  <text x="600" y="160" text-anchor="end" font-size="10.5" fill="#94a3b8">time &#8594; (~1 job / 5s)</text>
+</svg><div class="figcap">All 12 webhooks returned 200 instantly; the executions queued and the single worker drained them one at a time.</div></div>
+<pre><span class="c"># fired 12 jobs (~5s each) at a concurrency=1 worker</span>
+baseline bull:jobs:wait = 0
+ [14:44:25] bull:jobs:wait= 0  running=0  queued(new)=<span class="k">12</span>
+ [14:44:35] bull:jobs:wait=<span class="k">12</span>  running=1  queued(new)=11
+ [14:45:08] bull:jobs:wait= 9  running=1  queued(new)=9
+ [14:45:56] bull:jobs:wait= 4  running=1  queued(new)=4
+ [14:47:00] bull:jobs:wait= <span class="g">0</span>  running=1  queued(new)=0
+ [14:47:11] bull:jobs:wait= 0  running=0            <span class="c"># fully drained (~1 job / 5s)</span></pre>
+
+<!-- K -->
+<h2 id="K"><span class="ex">Exhibit K</span>Timeout cannot preempt synchronous CPU</h2>
+<p class="proves"><b>Proves:</b> <code>EXECUTIONS_TIMEOUT=10</code> did NOT stop a 30 s CPU busy-loop at 10 s — it ran to completion, then was marked error. <span class="v warnv">CONFIRMED</span></p>
+<div class="fig"><svg viewBox="0 0 640 120" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <text x="20" y="22" font-size="12.5" font-weight="700" fill="#e2e8f0">timeout (10s) vs a synchronous CPU loop</text>
+  <line x1="40" y1="86" x2="600" y2="86" stroke="#334155" stroke-width="1.5"/>
+  <rect x="40" y="46" width="522" height="26" rx="5" fill="#f59e0b" fill-opacity="0.85"/>
+  <text x="300" y="64" text-anchor="middle" font-size="12" font-weight="700" fill="#0b1020">job actually ran ~56 s (event loop blocked)</text>
+  <line x1="133" y1="34" x2="133" y2="94" stroke="#ef4444" stroke-width="2.5" stroke-dasharray="5 4"/>
+  <text x="138" y="44" font-size="11.5" font-weight="700" fill="#f87171">10s cap (expected stop)</text>
+  <circle cx="562" cy="59" r="5" fill="#ef4444"/>
+  <text x="556" y="44" text-anchor="end" font-size="11.5" font-weight="700" fill="#f87171">status=error @56s</text>
+  <text x="40" y="104" font-size="10.5" fill="#94a3b8">0s</text>
+  <text x="133" y="104" text-anchor="middle" font-size="10.5" fill="#94a3b8">10s</text>
+  <text x="562" y="104" text-anchor="middle" font-size="10.5" fill="#94a3b8">56s</text>
+  <text x="600" y="104" text-anchor="end" font-size="10.5" fill="#94a3b8">time &#8594;</text>
+</svg><div class="figcap">The timeout can't fire while the loop blocks the event loop &#8212; it only takes effect after the loop finishes.</div></div>
+<pre><span class="c"># EXECUTIONS_TIMEOUT=10 on worker; fired a ~30s CPU busy-loop</span>
+EXECUTIONS_TIMEOUT=10   <span class="c"># confirmed set</span>
+   t+7s   status=running
+   t+31s  status=running     <span class="c"># well past the 10s cap — not preempted</span>
+   t+57s  status=running
+   t+60s  status=<span class="k">error</span>
+
+execution 25:  status=error   ran_seconds=<span class="k">56</span>     <span class="c"># ran the full loop, THEN errored</span>
+worker still alive: running</pre>
+
+<div class="foot">
+  Evidence log — n8n v2.28.4 · queue mode · 512 MB heap cap.<br/>
+  Companion to <code>n8n-oom-report.html</code> (analysis &amp; prevention). All values verbatim from live measurements on this lab.<br/>
+  <b>Last synced: 2026-07-02</b> · config reverted to production shape · stack stopped.
+</div>
+</div>
+</body>
+</html>

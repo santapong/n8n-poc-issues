@@ -1,0 +1,42 @@
+{
+  "id": "gcTestLab00000001",
+  "name": "gc-test",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gctest",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "c1c2c3d4-0001-0001-0001-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [400, 300],
+      "webhookId": "gc-test-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Q1: can we clear the heap on demand inside a workflow?\nconst mb = b => Math.round(b / 1048576);\nconst before = process.memoryUsage().heapUsed;\nlet big = [];\nfor (let i = 0; i < 800000; i++) big.push({ v: i, s: 'x' + i });\nconst afterBuild = process.memoryUsage().heapUsed;\nbig = null;                         // drop the reference\nconst hasGc = typeof global.gc;     // 'function' only if node started with --expose-gc\nif (hasGc === 'function') { global.gc(); }\nconst afterClear = process.memoryUsage().heapUsed;\nreturn [{ json: {\n  hasGlobalGc: hasGc,\n  canForceGc: hasGc === 'function',\n  heapUsed_before_MB: mb(before),\n  heapUsed_afterBuild_MB: mb(afterBuild),\n  heapUsed_afterNull_and_gc_MB: mb(afterClear)\n} }];"
+      },
+      "id": "c1c2c3d4-0002-0002-0002-000000000002",
+      "name": "GC Probe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "GC Probe", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}

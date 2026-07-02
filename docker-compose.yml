@@ -1,0 +1,162 @@
+# n8n in queue mode, behind nginx, with Prometheus /metrics enabled.
+# Both n8n Node processes are capped at 512 MB heap so the web (main)
+# node can be crashed with a "JavaScript heap out of memory" during
+# large file uploads.
+
+x-n8n-env: &n8n-env
+  # ── Database ──
+  DB_TYPE: postgresdb
+  DB_POSTGRESDB_HOST: postgres
+  DB_POSTGRESDB_PORT: 5432
+  DB_POSTGRESDB_DATABASE: ${POSTGRES_DB}
+  DB_POSTGRESDB_USER: ${POSTGRES_USER}
+  DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD}
+
+  # ── Queue mode (Bull / Redis) ──
+  EXECUTIONS_MODE: queue
+  QUEUE_BULL_REDIS_HOST: redis
+  QUEUE_BULL_REDIS_PORT: 6379
+  QUEUE_HEALTH_CHECK_ACTIVE: "true"
+
+  # ── Shared secrets / misc ──
+  N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+  GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+  TZ: ${TZ}
+
+  # ── OOM knobs ──
+  # Keep binary data in memory (do NOT spill to filesystem) so uploads
+  # eat heap. This is the key to reproducing the web-node OOM.
+  N8N_DEFAULT_BINARY_DATA_MODE: default
+  N8N_PAYLOAD_SIZE_MAX: ${N8N_PAYLOAD_SIZE_MAX}
+  # 512 MB V8 heap cap on every n8n process.
+  NODE_OPTIONS: --max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}
+
+  # Silence the "permissions of n8n config file" warning on bind/volume.
+  N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+
+services:
+  # ───────────────────────── Postgres ─────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ────────────────────────── Redis ───────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ──────────────── n8n MAIN (the web node) ────────────────────
+  # Receives UI/API traffic and webhook uploads. This is the process
+  # that runs out of heap. Metrics live here at :5678/metrics.
+  n8n-main:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *n8n-env
+      N8N_HOST: ${N8N_HOST}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: ${WEBHOOK_URL}
+      # Trust one proxy hop (nginx) for correct client IPs.
+      N8N_PROXY_HOPS: 1
+      # ── Prometheus /metrics ──
+      N8N_METRICS: "true"
+      N8N_METRICS_INCLUDE_DEFAULT_METRICS: "true"      # nodejs_heap_size_used_bytes, etc.
+      N8N_METRICS_INCLUDE_QUEUE_METRICS: "true"
+      N8N_METRICS_INCLUDE_CACHE_METRICS: "true"
+      N8N_METRICS_INCLUDE_MESSAGE_EVENT_BUS_METRICS: "true"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    # Container ceiling ABOVE the 512MB heap so V8 crashes first.
+    mem_limit: ${N8N_MEM_LIMIT}
+
+  # ──────────────────────── n8n WORKER ────────────────────────
+  # Pulls jobs off Redis and executes them. Also capped at 512MB heap.
+  n8n-worker:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    command: worker
+    depends_on:
+      n8n-main:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *n8n-env
+      # Expose worker metrics (previously OFF → worker heap was invisible).
+      N8N_METRICS: "true"
+      N8N_METRICS_INCLUDE_DEFAULT_METRICS: "true"
+    ports:
+      - "5679:5678"    # worker /metrics on host :5679 for sampling + Prometheus
+    volumes:
+      - n8n_data:/home/node/.n8n
+    mem_limit: ${N8N_MEM_LIMIT}
+
+  # ─────────────────────── nginx proxy ────────────────────────
+  # Front door on :8080 → n8n-main:5678. Streams large uploads
+  # straight through (no request buffering, unlimited body size).
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - n8n-main
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+  # ─────────── Monitoring (optional: --profile monitoring) ─────
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    depends_on:
+      - n8n-main
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
+  n8n_data:
+  grafana_data:

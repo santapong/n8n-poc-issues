@@ -1,0 +1,42 @@
+{
+  "id": "slowRunLab0000001",
+  "name": "slow-run",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slowrun",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "d1d2d3d4-0001-0001-0001-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [400, 300],
+      "webhookId": "slow-run-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ~30s CPU loop (no OOM) so we can restart the worker MID-execution.\nlet s = 0;\nfor (let i = 0; i < 8000000000; i++) { s += i % 7; }\nreturn [{ json: { done: true, s } }];"
+      },
+      "id": "d1d2d3d4-0002-0002-0002-000000000002",
+      "name": "Slow Loop",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Slow Loop", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}

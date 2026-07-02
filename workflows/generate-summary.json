@@ -1,0 +1,42 @@
+{
+  "id": "genSummaryLab0001",
+  "name": "generate-summary",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "summary",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "e1e2e3e4-0001-0001-0001-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [400, 300],
+      "webhookId": "generate-summary-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// PREVENTION: process x items WITHOUT materializing them all.\n// Same x that OOM'd when we returned x ITEMS — here we only keep a running\n// total and return ONE small item, so the heap never fills.\nconst j = $input.first().json;\nconst x = Number(j.query?.x ?? 1000);\nlet checksum = 0;\nfor (let i = 0; i < x; i++) { checksum += i % 7; }\nreturn [{ json: { processed: x, checksum } }];"
+      },
+      "id": "e1e2e3e4-0002-0002-0002-000000000002",
+      "name": "Summarize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Summarize", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}

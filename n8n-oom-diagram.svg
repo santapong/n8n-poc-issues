@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 1010" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/>
+    </marker>
+    <linearGradient id="heap" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22c55e"/>
+      <stop offset="42%" stop-color="#f59e0b"/>
+      <stop offset="80%" stop-color="#ef4444"/>
+      <stop offset="100%" stop-color="#b91c1c"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="1010" fill="#f7f8fa"/>
+
+  <!-- Header -->
+  <text x="40" y="46" font-size="29" font-weight="700" fill="#0f172a">n8n Web-Node OOM — reproduce · system · why it crashes</text>
+  <text x="40" y="72" font-size="15" fill="#64748b">Queue mode · nginx reverse proxy · Node.js V8 heap capped at 512 MB · n8n v2.28.4</text>
+  <line x1="40" y1="88" x2="1240" y2="88" stroke="#e2e8f0" stroke-width="2"/>
+
+  <!-- ===================== BAND 1 + 2 : REPRODUCE + SYSTEM ===================== -->
+  <text x="40" y="120" font-size="18" font-weight="700" fill="#7c3aed">① REPRODUCE &#160;→&#160; ② THE SYSTEM (queue mode)</text>
+
+  <!-- Reproduce box -->
+  <rect x="40" y="140" width="200" height="118" rx="12" fill="#fff" stroke="#dc2626" stroke-width="2"/>
+  <text x="140" y="168" text-anchor="middle" font-size="14" font-weight="700" fill="#991b1b">① FLOOD</text>
+  <text x="140" y="192" text-anchor="middle" font-size="16" font-weight="700" fill="#0f172a">8 × 200 MB</text>
+  <text x="140" y="212" text-anchor="middle" font-size="16" font-weight="700" fill="#0f172a">uploads</text>
+  <text x="140" y="238" text-anchor="middle" font-size="11.5" fill="#64748b">POST /webhook/upload</text>
+
+  <line x1="240" y1="199" x2="292" y2="199" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- nginx -->
+  <rect x="296" y="140" width="196" height="118" rx="12" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="394" y="168" text-anchor="middle" font-size="15" font-weight="700" fill="#1e3a8a">nginx :8080</text>
+  <text x="394" y="192" text-anchor="middle" font-size="11.5" fill="#1e40af">client_max_body_size 0</text>
+  <text x="394" y="210" text-anchor="middle" font-size="11.5" fill="#1e40af">proxy_request_buffering off</text>
+  <text x="394" y="236" text-anchor="middle" font-size="12" font-weight="600" fill="#991b1b">→ streams straight through</text>
+
+  <line x1="492" y1="199" x2="544" y2="199" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- n8n-main (star) -->
+  <rect x="548" y="132" width="232" height="134" rx="12" fill="#ede9fe" stroke="#7c3aed" stroke-width="3"/>
+  <text x="664" y="160" text-anchor="middle" font-size="16" font-weight="700" fill="#4c1d95">n8n-main · WEB NODE</text>
+  <text x="664" y="182" text-anchor="middle" font-size="12" fill="#5b21b6">receives upload · /metrics</text>
+  <text x="664" y="204" text-anchor="middle" font-size="13" font-weight="700" fill="#4c1d95">V8 heap cap = 512 MB</text>
+  <rect x="588" y="220" width="152" height="30" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="664" y="240" text-anchor="middle" font-size="13" font-weight="700" fill="#991b1b">★ crashes HERE</text>
+
+  <!-- enqueue arrow to redis -->
+  <line x1="780" y1="180" x2="836" y2="180" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="808" y="170" text-anchor="middle" font-size="11" fill="#64748b">enqueue</text>
+
+  <!-- redis -->
+  <rect x="840" y="150" width="140" height="70" rx="12" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+  <text x="910" y="180" text-anchor="middle" font-size="14" font-weight="700" fill="#78350f">Redis</text>
+  <text x="910" y="200" text-anchor="middle" font-size="11.5" fill="#92400e">Bull queue</text>
+
+  <line x1="980" y1="185" x2="1020" y2="185" stroke="#475569" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- worker -->
+  <rect x="1024" y="150" width="176" height="70" rx="12" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="1112" y="178" text-anchor="middle" font-size="14" font-weight="700" fill="#1e3a8a">n8n-worker</text>
+  <text x="1112" y="198" text-anchor="middle" font-size="11.5" fill="#1e40af">executes job</text>
+
+  <!-- postgres -->
+  <rect x="840" y="240" width="360" height="42" rx="10" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+  <text x="1020" y="266" text-anchor="middle" font-size="13" font-weight="700" fill="#14532d">Postgres — workflows · credentials · execution data</text>
+  <line x1="780" y1="250" x2="838" y2="258" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <line x1="1112" y1="220" x2="1050" y2="240" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+  <!-- zoom arrow down -->
+  <line x1="664" y1="266" x2="664" y2="322" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrP)"/>
+  <text x="682" y="300" font-size="13" font-weight="600" fill="#7c3aed">zoom into its memory ↓</text>
+
+  <!-- ===================== BAND 3 : WHY IT CRASHES ===================== -->
+  <rect x="40" y="330" width="1200" height="512" rx="16" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>
+  <text x="64" y="366" font-size="18" font-weight="700" fill="#7c3aed">③ WHY IT CRASHES — inside the web node's memory</text>
+  <text x="64" y="388" font-size="13.5" fill="#64748b">The raw file is NOT what overflows — its base64 text is. Two regions; the heap cap only limits one.</text>
+
+  <!-- OFF-HEAP box -->
+  <rect x="72" y="410" width="330" height="150" rx="12" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+  <text x="237" y="440" text-anchor="middle" font-size="15" font-weight="700" fill="#78350f">OFF-HEAP (external)</text>
+  <rect x="100" y="456" width="274" height="46" rx="8" fill="#fde68a" stroke="#b45309"/>
+  <text x="237" y="484" text-anchor="middle" font-size="15" font-weight="700" fill="#78350f">raw file Buffer ≈ 117 MB</text>
+  <text x="237" y="524" text-anchor="middle" font-size="12.5" fill="#92400e">step 1: nginx streams bytes in →</text>
+  <text x="237" y="542" text-anchor="middle" font-size="12.5" font-weight="700" fill="#92400e">NOT limited by --max-old-space-size</text>
+
+  <!-- transform arrow -->
+  <line x1="402" y1="485" x2="470" y2="485" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrP)"/>
+  <text x="436" y="466" text-anchor="middle" font-size="12" font-weight="700" fill="#7c3aed">step 2</text>
+  <text x="436" y="512" text-anchor="middle" font-size="11" fill="#7c3aed">base64 ×1.37</text>
+  <text x="436" y="527" text-anchor="middle" font-size="11" fill="#7c3aed">+ JSON.stringify</text>
+
+  <!-- V8 HEAP box -->
+  <rect x="478" y="402" width="360" height="166" rx="12" fill="#ede9fe" stroke="#7c3aed" stroke-width="3"/>
+  <text x="658" y="430" text-anchor="middle" font-size="15" font-weight="700" fill="#4c1d95">V8 HEAP — capped at 512 MB</text>
+  <rect x="506" y="444" width="304" height="44" rx="8" fill="#ddd6fe" stroke="#7c3aed"/>
+  <text x="658" y="472" text-anchor="middle" font-size="15" font-weight="700" fill="#4c1d95">base64 strings ≈ 325 MB (77%)</text>
+  <rect x="506" y="494" width="304" height="34" rx="8" fill="#ddd6fe" stroke="#7c3aed"/>
+  <text x="658" y="516" text-anchor="middle" font-size="13" font-weight="600" fill="#5b21b6">+ execution JSON ≈ 100 MB</text>
+  <text x="658" y="552" text-anchor="middle" font-size="12.5" font-weight="700" fill="#991b1b">step 3: this region hits the cap → OOM</text>
+
+  <!-- FATAL box -->
+  <rect x="868" y="410" width="340" height="150" rx="12" fill="#fee2e2" stroke="#dc2626" stroke-width="2.5"/>
+  <text x="1038" y="440" text-anchor="middle" font-size="15" font-weight="700" fill="#991b1b">💥 FATAL</text>
+  <text x="1038" y="468" text-anchor="middle" font-size="13.5" font-weight="700" fill="#7f1d1d">JavaScript heap out of memory</text>
+  <text x="1038" y="496" text-anchor="middle" font-size="13" fill="#991b1b">exit 134 (V8 abort)</text>
+  <text x="1038" y="518" text-anchor="middle" font-size="13" fill="#991b1b">OOMKilled = false</text>
+  <text x="1038" y="544" text-anchor="middle" font-size="11.5" fill="#b91c1c">V8 hits its 512 cap before the kernel</text>
+
+  <!-- HEAP GAUGE -->
+  <text x="72" y="612" font-size="14" font-weight="700" fill="#0f172a">heap_used climbing to the 512 MB cap (measured):</text>
+  <rect x="72" y="628" width="1040" height="40" rx="10" fill="#f1f5f9" stroke="#e2e8f0"/>
+  <rect x="72" y="628" width="1022" height="40" rx="10" fill="url(#heap)"/>
+  <!-- cap line -->
+  <line x1="1112" y1="618" x2="1112" y2="682" stroke="#dc2626" stroke-width="2.5" stroke-dasharray="6 4"/>
+  <text x="1118" y="644" font-size="13" font-weight="700" fill="#dc2626">512</text>
+  <text x="1118" y="662" font-size="13" font-weight="700" fill="#dc2626">CAP 💥</text>
+  <!-- ticks: 145/512*1040=295 ; 222/512*1040=451 ; 503/512*1040=1022 -->
+  <line x1="367" y1="628" x2="367" y2="686" stroke="#334155" stroke-width="1.5"/>
+  <text x="367" y="702" text-anchor="middle" font-size="12" fill="#334155">145 MB · idle</text>
+  <line x1="523" y1="628" x2="523" y2="686" stroke="#334155" stroke-width="1.5"/>
+  <text x="523" y="702" text-anchor="middle" font-size="12" fill="#334155">222 MB · uploading</text>
+  <line x1="1094" y1="628" x2="1094" y2="686" stroke="#7f1d1d" stroke-width="1.5"/>
+  <text x="1030" y="702" text-anchor="middle" font-size="12" font-weight="700" fill="#7f1d1d">503 MB · FATAL</text>
+
+  <!-- Key rule -->
+  <rect x="72" y="726" width="1136" height="42" rx="10" fill="#f5f3ff" stroke="#7c3aed"/>
+  <text x="90" y="752" font-size="14" fill="#4c1d95"><tspan font-weight="700">Root cause:</tspan> nginx doesn't buffer → the upload lands in the web node, gets base64-encoded into JS strings on the V8 heap; enough concurrent uploads push past 512 MB and Node aborts.</text>
+
+  <!-- FIX strip -->
+  <rect x="72" y="780" width="1136" height="46" rx="10" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+  <text x="90" y="808" font-size="14" fill="#14532d"><tspan font-weight="700">FIX ✓</tspan>  nginx client_max_body_size 25m (→ 413 at edge)  ·  upload direct to GCS/S3 via signed URL (bytes bypass n8n)  ·  binary mode database/s3  ·  size heap ≈ concurrency × MB × 2.3</text>
+
+  <!-- ===================== LEGEND ===================== -->
+  <text x="40" y="882" font-size="13" font-weight="700" fill="#0f172a">Legend:</text>
+  <rect x="108" y="871" width="16" height="16" rx="3" fill="#ede9fe" stroke="#7c3aed"/><text x="130" y="884" font-size="12.5" fill="#334155">V8 heap (capped)</text>
+  <rect x="258" y="871" width="16" height="16" rx="3" fill="#fef3c7" stroke="#b45309"/><text x="280" y="884" font-size="12.5" fill="#334155">off-heap / storage</text>
+  <rect x="410" y="871" width="16" height="16" rx="3" fill="#dbeafe" stroke="#2563eb"/><text x="432" y="884" font-size="12.5" fill="#334155">process</text>
+  <rect x="510" y="871" width="16" height="16" rx="3" fill="#fee2e2" stroke="#dc2626"/><text x="532" y="884" font-size="12.5" fill="#334155">crash</text>
+  <rect x="590" y="871" width="16" height="16" rx="3" fill="#dcfce7" stroke="#15803d"/><text x="612" y="884" font-size="12.5" fill="#334155">fix</text>
+
+  <text x="1240" y="884" text-anchor="end" font-size="12" fill="#94a3b8">measured on lab · n8n v2.28.4 · heap cap 512 MB · synced 2026-07-02</text>
+</svg>

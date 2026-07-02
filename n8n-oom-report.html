@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>n8n Queue-Mode Web-Node OOM — Investigation Report</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      fontFamily: 'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
+      fontSize: '14px',
+      primaryColor: '#dbeafe',
+      primaryBorderColor: '#2563eb',
+      primaryTextColor: '#0f172a',
+      lineColor: '#64748b',
+      pie1: '#7c3aed', pie2: '#3b82f6', pie3: '#0ea5e9', pie4: '#14b8a6',
+      pie5: '#f59e0b', pie6: '#94a3b8', pie7: '#cbd5e1',
+      pieStrokeColor: '#ffffff', pieOuterStrokeColor: '#e2e8f0'
+    },
+    flowchart: { curve: 'basis', useMaxWidth: true }
+  });
+</script>
+<style>
+  :root{
+    --bg:#eef2f7; --card:#ffffff; --ink:#0f172a; --ink2:#475569; --muted:#64748b;
+    --border:#e2e8f0; --code:#0f172a; --codeink:#e2e8f0;
+    --blue:#2563eb; --blbg:#dbeafe; --red:#dc2626; --rdbg:#fee2e2;
+    --green:#15803d; --gnbg:#dcfce7; --amber:#b45309; --ambg:#fef3c7;
+    --purple:#7c3aed; --pubg:#ede9fe;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    line-height:1.65;font-size:16px}
+  .wrap{max-width:980px;margin:0 auto;padding:0 20px 80px}
+  header.hero{background:linear-gradient(135deg,#1e293b 0%,#4c1d95 55%,#7c3aed 100%);
+    color:#fff;padding:44px 20px 40px;margin-bottom:28px;
+    box-shadow:0 10px 30px rgba(76,29,149,.25)}
+  header.hero .wrap{padding-bottom:0}
+  header.hero h1{margin:0 0 8px;font-size:30px;letter-spacing:-.3px}
+  header.hero p{margin:0;opacity:.9;font-size:16px}
+  .pill{display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28);
+    padding:3px 10px;border-radius:999px;font-size:12.5px;margin:10px 6px 0 0;font-weight:600}
+  h2{font-size:22px;margin:38px 0 14px;padding-left:14px;border-left:5px solid var(--purple);
+    scroll-margin-top:16px}
+  h2 .num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;
+    background:var(--purple);color:#fff;border-radius:7px;font-size:14px;margin-right:8px;vertical-align:2px}
+  h3{font-size:17px;margin:22px 0 8px;color:var(--ink)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px 22px;
+    margin:16px 0;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  p{margin:10px 0}
+  code{background:#f1f5f9;color:#be123c;padding:1.5px 6px;border-radius:6px;font-size:13.5px;
+    font-family:"SF Mono",ui-monospace,"Cascadia Code",Consolas,monospace}
+  pre{background:var(--code);color:var(--codeink);padding:16px 18px;border-radius:12px;overflow-x:auto;
+    font-family:"SF Mono",ui-monospace,"Cascadia Code",Consolas,monospace;font-size:13px;line-height:1.5}
+  pre code{background:none;color:inherit;padding:0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{background:#f8fafc;font-weight:700;color:var(--ink)}
+  tr:last-child td{border-bottom:none}
+  .callout{border-radius:12px;padding:14px 16px 14px 18px;margin:16px 0;border-left:5px solid}
+  .callout .t{font-weight:700;margin-bottom:3px;display:flex;align-items:center;gap:7px}
+  .danger{background:var(--rdbg);border-color:var(--red)}   .danger .t{color:#991b1b}
+  .fix{background:var(--gnbg);border-color:var(--green)}    .fix .t{color:#166534}
+  .warn{background:var(--ambg);border-color:var(--amber)}   .warn .t{color:#92400e}
+  .info{background:var(--blbg);border-color:var(--blue)}    .info .t{color:#1e40af}
+  .insight{background:var(--pubg);border-color:var(--purple)} .insight .t{color:#5b21b6}
+  .mermaid{background:#fff;border:1px solid var(--border);border-radius:14px;padding:18px;
+    margin:18px 0;text-align:center;overflow-x:auto}
+  .cap{font-size:13px;color:var(--muted);text-align:center;margin:-8px 0 18px}
+  /* heap bars */
+  .bars{margin:14px 0}
+  .barrow{display:grid;grid-template-columns:120px 1fr 70px;align-items:center;gap:12px;margin:8px 0}
+  .barlbl{font-size:13.5px;color:var(--ink2);font-weight:600}
+  .track{background:#f1f5f9;border-radius:8px;height:26px;position:relative;overflow:hidden;
+    border:1px solid var(--border)}
+  .fill{height:100%;border-radius:7px 0 0 7px;display:flex;align-items:center;
+    justify-content:flex-end;padding-right:8px;color:#fff;font-size:12px;font-weight:700}
+  .capline{position:absolute;right:0;top:-3px;bottom:-3px;border-right:2px dashed #dc2626}
+  .barval{font-size:13px;color:var(--muted);text-align:right}
+  /* toc */
+  nav.toc{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 20px;margin-bottom:8px}
+  nav.toc h4{margin:0 0 10px;font-size:14px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+  nav.toc ol{margin:0;padding-left:20px;columns:2;column-gap:28px;font-size:14px}
+  nav.toc a{color:var(--blue);text-decoration:none}
+  nav.toc a:hover{text-decoration:underline}
+  .kbd{font-family:ui-monospace,monospace;background:#f1f5f9;border:1px solid var(--border);
+    border-bottom-width:2px;border-radius:5px;padding:1px 6px;font-size:12.5px;color:var(--ink)}
+  .tag{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:6px}
+  .tag.red{background:var(--rdbg);color:#991b1b}
+  .tag.green{background:var(--gnbg);color:#166534}
+  .tag.amber{background:var(--ambg);color:#92400e}
+  .tag.purple{background:var(--pubg);color:#5b21b6}
+  .foot{color:var(--muted);font-size:13px;text-align:center;margin-top:40px;border-top:1px solid var(--border);padding-top:18px}
+  strong{color:var(--ink)}
+  .topnav{position:sticky;top:0;z-index:100;display:flex;gap:6px;align-items:center;flex-wrap:wrap;background:#1e293b;padding:8px 16px;box-shadow:0 2px 8px rgba(15,23,42,.18)}
+  .topnav .navbrand{color:#c4b5fd;font-weight:700;font-size:13px;margin-right:10px}
+  .topnav a{color:#cbd5e1;text-decoration:none;font-size:13px;padding:5px 12px;border-radius:8px}
+  .topnav a:hover{background:rgba(255,255,255,.12);color:#fff}
+  .topnav a.active{background:#7c3aed;color:#fff;font-weight:600}
+</style>
+</head>
+<body>
+<div class="topnav">
+  <span class="navbrand">n8n OOM docs</span>
+  <a href="n8n-oom-report.html" class="active">Report</a>
+  <a href="n8n-oom-evidence.html">Evidence</a>
+  <a href="n8n-oom-diagram.svg">Web-node diagram</a>
+  <a href="n8n-worker-oom-diagram.svg">Worker-node diagram</a>
+</div>
+<header class="hero">
+  <div class="wrap">
+    <h1>n8n Queue-Mode Web-Node OOM</h1>
+    <p>Reproducing &amp; explaining the <em>"JavaScript heap out of memory"</em> crash on large file uploads.</p>
+    <div>
+      <span class="pill">n8n v2.28.4</span>
+      <span class="pill">Queue mode (Bull / Redis)</span>
+      <span class="pill">nginx reverse proxy</span>
+      <span class="pill">Prometheus /metrics</span>
+      <span class="pill">512 MB heap cap</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<nav class="toc">
+  <h4>Contents</h4>
+  <ol>
+    <li><a href="#s1">Overview &amp; Goal</a></li>
+    <li><a href="#s2">Architecture &amp; Stack</a></li>
+    <li><a href="#s3">The OOM Knobs</a></li>
+    <li><a href="#s4">Reproduction Steps</a></li>
+    <li><a href="#s5">The Crash — Evidence</a></li>
+    <li><a href="#s6">Why It Dies — Mechanism</a></li>
+    <li><a href="#s7">Where the Memory Lives</a></li>
+    <li><a href="#s8">Binary Data Modes</a></li>
+    <li><a href="#s9">Cloud Run Constraints</a></li>
+    <li><a href="#s10">How to Fix It</a></li>
+    <li><a href="#s11">Which Node Dies (mental model)</a></li>
+    <li><a href="#s12">The [1..x] Loop / Worker OOM</a></li>
+    <li><a href="#s13">Observability</a></li>
+    <li><a href="#s14">Worker OOM — measured evidence</a></li>
+    <li><a href="#s15">Clear heap? &amp; auto-restart (Q1/Q2)</a></li>
+    <li><a href="#s16">Failure-mode catalog</a></li>
+    <li><a href="#s17">Prevention — proven</a></li>
+    <li><a href="#s18">Prevention playbook (researched)</a></li>
+    <li><a href="#s19">Resilience &amp; scaling (beyond memory)</a></li>
+    <li><a href="#s20">Lab State &amp; Files Changed</a></li>
+    <li><a href="#s21">Quick Reference</a></li>
+  </ol>
+</nav>
+
+<!-- 1 -->
+<h2 id="s1"><span class="num">1</span>Overview &amp; Goal</h2>
+<div class="card">
+<p>The goal was to <strong>reproduce, on purpose,</strong> the failure where the n8n <strong>web (main) node</strong> crashes with
+<em>"JavaScript heap out of memory"</em> when it receives large file uploads — running in the same shape as production:
+<strong>queue mode</strong>, behind <strong>nginx</strong>, with Prometheus <code>/metrics</code> enabled, and the Node heap capped at
+<strong>512 MB</strong> so the crash is fast and observable.</p>
+<div class="callout insight">
+  <div class="t">🎯 One-line result</div>
+  Uploaded files are turned into <strong>base64 strings on the V8 heap</strong> before being enqueued. Enough concurrent uploads push
+  the heap past 512 MB and Node aborts (<code>exit 134</code>) — confirmed, with a heap snapshot showing <strong>77% of the heap was strings</strong>.
+</div>
+</div>
+
+<!-- 2 -->
+<h2 id="s2"><span class="num">2</span>Architecture &amp; Stack</h2>
+<div class="card">
+<p>Six services. The browser and webhook uploads enter through nginx; only the <strong>main</strong> node exposes <code>/metrics</code>.</p>
+<div class="mermaid">
+flowchart LR
+  U["👤 Browser / uploader"] -->|":8080"| NG["nginx&lt;br/&gt;reverse proxy"]
+  NG -->|"proxy_pass"| M["n8n-main&lt;br/&gt;WEB NODE · /metrics&lt;br/&gt;heap cap 512 MB"]
+  M <-->|"SQL"| PG[("Postgres")]
+  M -->|"enqueue job"| R[("Redis&lt;br/&gt;Bull queue")]
+  R -->|"pull job"| W["n8n-worker&lt;br/&gt;executes workflows&lt;br/&gt;heap cap 512 MB"]
+  W <-->|"SQL"| PG
+  PR["Prometheus :9090"] -.->|"scrape"| M
+  GF["Grafana :3000"] -.-> PR
+  class M web
+  class W wrk
+  classDef web fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px;
+  classDef wrk fill:#dbeafe,stroke:#2563eb,color:#1e3a8a,stroke-width:1.5px;
+</div>
+<div class="cap">Uploads land on <b>n8n-main</b>; the actual workflow logic runs on <b>n8n-worker</b>.</div>
+<table>
+  <tr><th>Service</th><th>Port</th><th>Role</th></tr>
+  <tr><td>nginx</td><td><code>8080</code></td><td>front door → n8n-main; streams uploads through</td></tr>
+  <tr><td>n8n-main</td><td>(internal 5678)</td><td>UI / API / webhooks + <code>/metrics</code>; <span class="tag red">the node that OOMs</span></td></tr>
+  <tr><td>n8n-worker</td><td>—</td><td>pulls jobs from Redis, executes them</td></tr>
+  <tr><td>postgres / redis</td><td>—</td><td>database + Bull queue</td></tr>
+  <tr><td>prometheus / grafana</td><td><code>9090</code>/<code>3000</code></td><td>optional (<code>--profile monitoring</code>)</td></tr>
+</table>
+</div>
+
+<!-- 3 -->
+<h2 id="s3"><span class="num">3</span>The OOM Knobs</h2>
+<div class="card">
+<p>These settings are what make the crash reproducible and make it match the real symptom.</p>
+<table>
+  <tr><th>Setting</th><th>Effect</th></tr>
+  <tr><td><code>NODE_OPTIONS=--max-old-space-size=512</code></td><td>Caps the V8 heap at 512 MB on both nodes.</td></tr>
+  <tr><td><code>mem_limit: 1024m</code> (&gt; heap cap)</td><td>Container ceiling is <em>higher</em> than the heap, so <strong>V8 aborts first</strong> — a clean JS heap error, not a kernel kill.</td></tr>
+  <tr><td><code>N8N_DEFAULT_BINARY_DATA_MODE=default</code></td><td>Binary kept <strong>in memory</strong> (not spilled to disk) → uploads eat heap.</td></tr>
+  <tr><td><code>N8N_PAYLOAD_SIZE_MAX=256</code></td><td>n8n accepts payloads up to 256 MB.</td></tr>
+  <tr><td>nginx <code>client_max_body_size 0</code><br/><code>proxy_request_buffering off</code></td><td>Unlimited body + no buffering → nginx <strong>streams straight into the main node's heap</strong>.</td></tr>
+</table>
+</div>
+
+<!-- 4 -->
+<h2 id="s4"><span class="num">4</span>Reproduction Steps</h2>
+<div class="card">
+<h3>Bring it up &amp; verify queue mode + metrics</h3>
+<pre><code>docker compose up -d
+# queue mode proof (worker log): "n8n worker is now ready · Concurrency: 10 · Instance registered"
+# main log: "...manual executions in the main instance in scaling mode..."  ← scaling = queue
+curl -s http://localhost:8080/metrics | grep n8n_nodejs_heap_size_used_bytes</code></pre>
+<h3>Publish the upload webhook</h3>
+<pre><code>docker compose cp workflows/upload-oom.json n8n-main:/tmp/upload-oom.json
+docker compose exec -T n8n-main n8n import:workflow --input=/tmp/upload-oom.json
+docker compose exec -T n8n-main n8n publish:workflow --id=uploadOOMlab0001   # v2.28 CLI
+docker compose restart n8n-main
+# POST http://localhost:8080/webhook/upload  → HTTP 200</code></pre>
+<h3>Flood it</h3>
+<pre><code># 8 concurrent × 200 MB uploads per round
+SIZE_MB=200 CONCURRENCY=8 ROUNDS=20 ./scripts/upload-oom.sh</code></pre>
+<div class="callout warn">
+  <div class="t">⚠️ Gotchas we hit on Windows</div>
+  Git Bash mangled <code>/tmp/...</code> paths (fixed with <code>MSYS_NO_PATHCONV=1</code>); the workflow JSON needed a top-level
+  <code>id</code>; and v2.28 renamed <code>update:workflow --active</code> → <code>publish:workflow</code>.
+</div>
+</div>
+
+<!-- 5 -->
+<h2 id="s5"><span class="num">5</span>The Crash — Evidence</h2>
+<div class="card">
+<p>One round of 8×200 MB uploads drove the heap from idle to the cap in about two seconds:</p>
+<div class="bars">
+  <div class="barrow"><span class="barlbl">idle</span>
+    <div class="track"><div class="fill" style="width:28%;background:#16a34a">145 MB</div><div class="capline"></div></div>
+    <span class="barval">of 512</span></div>
+  <div class="barrow"><span class="barlbl">uploading</span>
+    <div class="track"><div class="fill" style="width:43%;background:#d97706">222 MB</div><div class="capline"></div></div>
+    <span class="barval">of 512</span></div>
+  <div class="barrow"><span class="barlbl">serializing</span>
+    <div class="track"><div class="fill" style="width:98%;background:#dc2626">503 MB 💥</div><div class="capline"></div></div>
+    <span class="barval">of 512</span></div>
+</div>
+<p>When auto-restart was disabled (<code>restart:"no"</code>) the container <strong>stayed dead</strong>, preserving the fatal log:</p>
+<pre><code>&lt;--- Last few GCs ---&gt;
+... Mark-Compact 503.0 (521.0) -&gt; 502.8 MB ... allocation failure; scavenge might not succeed
+FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory
+
+# container state:
+status=exited   exitCode=134   OOMKilled=false</code></pre>
+<div class="callout danger">
+  <div class="t">🔎 Crash signature — why this matters</div>
+  <code>exit 134</code> = SIGABRT: <strong>V8 aborted itself</strong> after printing the fatal error. <code>OOMKilled=false</code> means the
+  <strong>kernel did not kill it</strong> — V8 hit its own 512 MB cap first. That's exactly the real-world symptom (a Node heap error, not a silent SIGKILL).
+</div>
+</div>
+
+<!-- 6 -->
+<h2 id="s6"><span class="num">6</span>Why It Dies — The Mechanism</h2>
+<div class="mermaid">
+flowchart TD
+  A["8 × 200 MB uploads&lt;br/&gt;(~1.6 GB of bytes)"]:::in --> B["nginx&lt;br/&gt;buffering OFF → streams through,&lt;br/&gt;absorbs nothing"]:::proc
+  B --> C["n8n-main receives multipart&lt;br/&gt;→ Buffer (OFF-heap)"]:::proc
+  C --> D["base64-encode file&lt;br/&gt;→ STRING on V8 heap ×1.37"]:::heap
+  D --> E["JSON.stringify execution data&lt;br/&gt;→ more strings on heap"]:::heap
+  E --> F["push execution to Redis queue"]:::store
+  D --> X{"heap &gt; 512 MB?"}:::dec
+  E --> X
+  X -->|"yes"| K["💥 FATAL: JavaScript heap&lt;br/&gt;out of memory (exit 134)"]:::crash
+  classDef in fill:#f1f5f9,stroke:#64748b,color:#0f172a;
+  classDef proc fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef heap fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px;
+  classDef store fill:#fef3c7,stroke:#b45309,color:#78350f;
+  classDef dec fill:#fff,stroke:#dc2626,color:#991b1b,stroke-width:1.5px;
+  classDef crash fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:2.5px;
+</div>
+<div class="cap">Steps <b>base64</b> and <b>JSON.stringify</b> are where hundreds of MB of strings pile onto the heap.</div>
+
+<!-- 7 -->
+<h2 id="s7"><span class="num">7</span>Where the Memory Lives — the key insight</h2>
+<div class="card">
+<p>There are <strong>two</strong> memory regions, and <code>--max-old-space-size</code> only caps one of them.</p>
+<div class="mermaid">
+flowchart LR
+  subgraph HEAP["V8 HEAP — capped at 512 MB (--max-old-space-size)"]
+    S["base64 strings&lt;br/&gt;≈ 325 MB"]:::heap
+    J["execution JSON / objects&lt;br/&gt;≈ 100 MB"]:::heap
+  end
+  subgraph EXT["OFF-HEAP (external) — NOT capped"]
+    BUF["raw file Buffer&lt;br/&gt;≈ 117 MB"]:::store
+  end
+  BUF -->|"base64-encoded into"| S
+  S --> OOM["💥 this region hits 512 → OOM"]:::crash
+  classDef heap fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px;
+  classDef store fill:#fef3c7,stroke:#b45309,color:#78350f;
+  classDef crash fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px;
+</div>
+<p>A heap snapshot captured at 334 MB (via <code>--heapsnapshot-signal=SIGUSR2</code>) breaks down like this:</p>
+<div class="mermaid">
+pie showData
+  title Heap composition by object type (self_size, MB)
+  "string — base64 file text" : 325
+  "code" : 21
+  "native" : 19
+  "array" : 16
+  "closure" : 15
+  "object" : 11
+  "other" : 15
+</div>
+<div class="callout insight">
+  <div class="t">💡 The file isn't what overflowed — its <em>base64 text</em> is</div>
+  <strong>~77% of the heap was <code>string</code></strong>. The raw upload Buffer sits <em>off-heap</em> (external) and isn't capped by
+  <code>--max-old-space-size</code>. What hits the 512 MB cap is the base64 <em>string</em> + execution JSON that n8n builds to enqueue the job.
+</div>
+</div>
+
+<!-- 8 -->
+<h2 id="s8"><span class="num">8</span>Binary Data Modes — and why "store in DB" doesn't help</h2>
+<div class="card">
+<p><code>N8N_DEFAULT_BINARY_DATA_MODE</code> supports <code>default</code>, <code>filesystem</code>, <code>s3</code> and <code>database</code> (see the correction in §18 — n8n recommends <code>database</code> for queue mode). The trap is <code>default</code> mode: the file <em>does</em> end up in Postgres, but only after passing through the heap as base64 — so it doesn't spare the web node:</p>
+<div class="mermaid">
+flowchart LR
+  U["upload"] --> B["Buffer&lt;br/&gt;(external)"]:::store
+  B --> H["base64 STRING&lt;br/&gt;(V8 heap)"]:::heap
+  H --> JZ["execution JSON"]:::heap
+  JZ --> DB[("Postgres")]:::db
+  H --> OOM["💥 OOM happens HERE&lt;br/&gt;before the DB write"]:::crash
+  classDef store fill:#fef3c7,stroke:#b45309,color:#78350f;
+  classDef heap fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px;
+  classDef db fill:#dcfce7,stroke:#15803d,color:#14532d;
+  classDef crash fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px;
+</div>
+<table>
+  <tr><th>Mode</th><th>Where bytes go</th><th>Touches heap?</th><th>Fits your setup?</th></tr>
+  <tr><td><code>default</code></td><td>memory → inline (base64) in Postgres</td><td class="tag red" style="color:#991b1b">yes — the cause</td><td>current; <b>bloats DB</b> too</td></tr>
+  <tr><td><code>filesystem</code></td><td>local disk + DB reference</td><td>no (streams to disk)</td><td>needs <b>shared disk</b> across nodes → ✗ on Cloud Run</td></tr>
+  <tr><td><code>s3</code></td><td>object storage + DB reference</td><td>no (streams to store)</td><td>works, but = infra change (GCS)</td></tr>
+  <tr><td><code>database</code></td><td>dedicated DB table + reference</td><td>transient only (a reference, not inline base64)</td><td>n8n's recommended mode for queue setups</td></tr>
+</table>
+<p style="font-size:13px;color:#64748b;margin-top:8px">Note: binary modes only move <b>binary/file</b> data — they don't help the JSON/array-item OOMs (§14, the worker story), which are a different path.</p>
+<div class="callout warn">
+  <div class="t">⚠️ Queue-mode double hit</div>
+  In <code>default</code> mode the base64 execution data is pushed through <strong>Redis to the worker</strong>, which base64-<em>decodes</em> it into
+  <strong>its own heap</strong>. So the same data pressures both the web node and the worker.
+</div>
+</div>
+
+<!-- 9 -->
+<h2 id="s9"><span class="num">9</span>Cloud Run Constraints</h2>
+<div class="card">
+<div class="callout danger">
+  <div class="t">🚫 filesystem mode is doubly out on Cloud Run</div>
+  <b>1.</b> Cloud Run's writable filesystem is <strong>in-memory (tmpfs)</strong> — writing to disk consumes the instance's RAM, so it just
+  trades a clean heap error for a <em>Cloud Run "memory limit exceeded" kill</em> (137).<br/>
+  <b>2.</b> Instances are isolated &amp; ephemeral — <strong>no shared/persistent disk</strong> for main + workers to share.
+</div>
+<table>
+  <tr><th>Cloud Run lever</th><th>Why it helps</th></tr>
+  <tr><td><code>--concurrency=1..4</code></td><td>Caps simultaneous requests <em>per instance</em> → one instance can't be flooded with many big uploads.</td></tr>
+  <tr><td>instance memory + <code>--max-old-space-size</code></td><td>Without the flag, Node auto-sizes the heap to ~75% of instance memory.</td></tr>
+  <tr><td>GCS (S3-compatible)</td><td>The natural object store on GCP if you ever adopt external binary mode.</td></tr>
+</table>
+</div>
+
+<!-- 10 -->
+<h2 id="s10"><span class="num">10</span>How to Fix It</h2>
+<div class="card">
+<div class="callout insight">
+  <div class="t">📐 The governing formula</div>
+  <pre style="margin:6px 0 0"><code>heap needed  ≈  concurrency  ×  max_upload_MB  ×  2.3
+                 └──── bound BOTH, or raise the heap ────┘</code></pre>
+</div>
+<div class="mermaid">
+flowchart TD
+  Q{"Can bytes avoid n8n?"}:::dec
+  Q -->|"yes — best for big files"| B["Fix B: signed upload URL&lt;br/&gt;client → GCS, n8n gets only a reference&lt;br/&gt;heap flat + DB small"]:::fix
+  Q -->|"no — file must pass through"| A["Fix A: bound the inputs&lt;br/&gt;size cap + concurrency cap + sized heap"]:::fix
+  A --> A1["nginx: client_max_body_size 25m"]:::fix
+  A --> A2["n8n: N8N_PAYLOAD_SIZE_MAX / N8N_FORMDATA_FILE_SIZE_MAX = 25"]:::fix
+  A --> A3["Cloud Run: --concurrency=2"]:::fix
+  Q -.->|"parked (infra change)"| C["Fix C: s3 binary mode (GCS)"]:::warnb
+  classDef dec fill:#fff,stroke:#2563eb,color:#1e40af,stroke-width:1.5px;
+  classDef fix fill:#dcfce7,stroke:#15803d,color:#14532d;
+  classDef warnb fill:#fef3c7,stroke:#b45309,color:#78350f;
+</div>
+<table>
+  <tr><th>Fix</th><th>What it does</th><th>Infra change</th></tr>
+  <tr><td><span class="tag green">A — bound inputs</span></td><td>Cap size (nginx 413 + n8n) &amp; concurrency; size heap to formula. Makes <code>default</code> survivable.</td><td>none</td></tr>
+  <tr><td><span class="tag green">B — signed URL</span></td><td>Client uploads to GCS; n8n receives only a reference → removes heap crash <em>and</em> DB bloat.</td><td>app change</td></tr>
+  <tr><td><span class="tag amber">C — s3 mode</span></td><td>External binary storage (the "official" scaled answer).</td><td>yes (parked)</td></tr>
+</table>
+</div>
+
+<!-- 11 -->
+<h2 id="s11"><span class="num">11</span>Which Node Dies — the mental model</h2>
+<div class="card">
+<p>In queue mode, <strong>whichever node holds/serializes the data in its heap is the one that dies.</strong></p>
+<div class="mermaid">
+flowchart TB
+  subgraph MAIN["🖥️ MAIN (web node)"]
+    m1["receive webhook / big HTTP body ← uploads OOM here"]:::heap
+    m2["MANUAL 'Execute Workflow' ← runs here by default!"]:::heap
+    m3["load / serialize execution data for UI + to enqueue"]:::heap
+  end
+  subgraph WORKER["⚙️ WORKER"]
+    w1["runs PRODUCTION executions (the nodes)"]:::wrk
+    w2["Code node building [1..x] / millions of items ← OOM here"]:::wrk
+    w3["big API responses / DB rows / files into memory"]:::wrk
+  end
+  MAIN -->|"enqueue job → Redis"| WORKER
+  classDef heap fill:#ede9fe,stroke:#7c3aed,color:#4c1d95;
+  classDef wrk fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+</div>
+<h3>Causes of MAIN-node OOM besides uploads</h3>
+<table>
+  <tr><th>Cause</th><th>Why it hits main</th></tr>
+  <tr><td>Manual "Execute Workflow" from the editor</td><td>Runs on <b>main</b> by default (<code>OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS=false</code>).</td></tr>
+  <tr><td>Large non-file JSON payloads</td><td>Buffered &amp; parsed on main, same as a file.</td></tr>
+  <tr><td>Viewing a big execution in the UI</td><td>Main loads + serializes the whole run to send to the browser.</td></tr>
+  <tr><td>High request concurrency</td><td>Many simultaneous requests buffering at once.</td></tr>
+</table>
+</div>
+
+<!-- 12 -->
+<h2 id="s12"><span class="num">12</span>The <code>[1..x]</code> Loop — will it break the worker?</h2>
+<div class="card">
+<div class="callout info">
+  <div class="t">It depends on <em>where</em> it runs</div>
+  <b>Production</b> (webhook/schedule/trigger → from the queue) → runs on the <b>WORKER</b> → yes, breaks the worker.<br/>
+  <b>Manual</b> ("Execute Workflow" in the editor) → runs on the <b>MAIN</b> node by default → breaks the web node instead.
+</div>
+<h3>The n8n multiplier</h3>
+<pre><code>return one item holding [1..x]   →  cheap-ish  (number array)
+return x ITEMS (one per number)  →  EXPENSIVE  each item = a {json:{…}} object
+                                     + n8n retains EVERY node's output for the run
+                                     + serializes it all at the end</code></pre>
+<table>
+  <tr><th>x (as items)</th><th>On a 512 MB node</th></tr>
+  <tr><td>tens of thousands</td><td class="tag green" style="color:#166534">fine</td></tr>
+  <tr><td>millions</td><td class="tag red" style="color:#991b1b">OOM — item overhead + retention + serialization</td></tr>
+</table>
+</div>
+
+<!-- 13 -->
+<h2 id="s13"><span class="num">13</span>Observability — can metrics show which workflow ate memory?</h2>
+<div class="card">
+<div class="callout danger">
+  <div class="t">❌ No per-workflow memory metric exists</div>
+  All memory gauges (<code>n8n_nodejs_heap_size_used_bytes</code>, <code>n8n_process_resident_memory_bytes</code>, …) are
+  <strong>process-wide</strong> — none carry a <code>{workflow=…}</code> label, and no flag adds one. One process = one shared V8 heap with no per-workflow tagging.
+</div>
+<div class="callout warn">
+  <div class="t">⚠️ Gap found: the worker has NO metrics</div>
+  <code>N8N_METRICS</code> isn't set on the worker and Prometheus only scrapes <code>n8n-main</code> — so today you're <strong>blind to worker memory</strong>,
+  which is exactly where the <code>[1..x]</code> loop would OOM.
+</div>
+<h3>How to actually attribute a spike to a workflow</h3>
+<div class="mermaid">
+flowchart LR
+  A["METRICS (Grafana)&lt;br/&gt;WHEN + WHICH node"]:::proc --> B["WORKER LOG at that time&lt;br/&gt;executionId / workflowId"]:::proc
+  B --> C["executions / Postgres&lt;br/&gt;→ workflow name&lt;br/&gt;→ biggest execution_data rows"]:::db
+  classDef proc fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef db fill:#dcfce7,stroke:#15803d,color:#14532d;
+</div>
+<div class="callout fix">
+  <div class="t">✅ The deterministic trick</div>
+  Run workers at <code>--concurrency=1</code> and <strong>scale out</strong>. Each worker runs one execution at a time, so that worker's whole-process
+  heap <em>equals</em> that one execution's memory — a spike on <code>worker-3</code> = exactly the workflow it's running.
+  <br/>(Requires: enable <code>N8N_METRICS</code> on the worker + add a worker scrape target.)
+</div>
+</div>
+
+<!-- 14 -->
+<h2 id="s14"><span class="num">14</span>Worker OOM — measured evidence</h2>
+<div class="card">
+<p>Same lab, different load: a production <b>Code node</b> builds <code>x</code> items — so the work runs on the <b>worker</b> (concurrency 1, so its heap = exactly one execution).</p>
+<h3>Heap lifecycle, measured on the worker</h3>
+<pre><code> baseline .............................. 121 MB
+ x=100,000 : heapUsed 121 → 148 (spike) → 114 after finish+GC   ✅ recovered
+             heapTotal 181 → 121    RSS 330 → 221
+ x=300,000 : heapUsed → 204    RSS → 465    ⚠️ stayed HIGH (no full drop)
+ x=600,000 : from the elevated floor → 💥 OOM (worker process, exit 134)</code></pre>
+<table>
+  <tr><th>Question</th><th>Answer</th><th>Evidence</th></tr>
+  <tr><td>Can the <code>[1..x]</code> loop take the worker down?</td><td><span class="tag red">Yes</span></td><td><code>exit 134</code> · <code>JavaScript heap out of memory</code></td></tr>
+  <tr><td>Is what's in the heap the execution's data?</td><td><span class="tag purple">Yes</span></td><td>heap grew with x: 100k → <b>+27 MB</b>, 300k → <b>+83 MB</b></td></tr>
+  <tr><td>Does the heap drop when the workflow finishes?</td><td><span class="tag green">heapUsed yes</span></td><td>100k: heapUsed 148→114, RSS 330→221 after GC — but big runs leave RSS elevated</td></tr>
+</table>
+<div class="callout warn"><div class="t">⚠️ Incomplete recovery compounds</div>The 300k run didn't release fully (RSS stayed 465 MB), so the 600k run started from a high floor and tipped over. In <code>default</code> mode the finish also serializes every item into Postgres → DB bloat per run.</div>
+</div>
+
+<!-- 15 -->
+<h2 id="s15"><span class="num">15</span>Clearing the heap? &amp; what auto-restart does <span style="font-size:14px;color:#64748b">(Q1 &amp; Q2)</span></h2>
+<div class="card">
+<h3>Q1 — Can you clear the heap from inside a workflow? &nbsp;<span class="tag red">No</span></h3>
+<table>
+  <tr><th>Attempt</th><th>Result (measured)</th></tr>
+  <tr><td><code>global.gc()</code></td><td>needs <code>--expose-gc</code> — <b>not set</b> (<code>NODE_OPTIONS=--max-old-space-size=512</code>)</td></tr>
+  <tr><td><code>process.memoryUsage()</code> in a Code node</td><td><code>ReferenceError: process is not defined</code> — Code runs in a locked-down <code>vm</code> sandbox</td></tr>
+</table>
+<div class="callout danger"><div class="t">❌ You can't free it at runtime</div>No GC handle, and no <code>process</code>/<code>global</code> in the Code-node sandbox. n8n also <b>retains every node's output</b> for the run, so the execution's own data can't be released mid-run. The only lever is to <b>not accumulate</b>: batch (Loop Over Items / SplitInBatches), paginate, and avoid returning giant item sets.</div>
+
+<h3>Q2 — Does auto-restart drop the executing workflow? &nbsp;<span class="tag amber">Execution: always dropped · Container: may not even restart</span></h3>
+<div class="mermaid">
+flowchart TD
+  W["worker process&lt;br/&gt;SURVIVED (restarts=0)"]:::proc -->|"spawns"| R["JS Task Runner (subprocess)&lt;br/&gt;runs the Code node&lt;br/&gt;own 512 MB heap"]:::heap
+  R -->|"build [1..x] too big"| K["💥 runner OOM&lt;br/&gt;'Node ran out of memory'"]:::crash
+  K --> E["worker catches it&lt;br/&gt;→ execution = ERROR"]:::store
+  classDef proc fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef heap fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px;
+  classDef crash fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px;
+  classDef store fill:#fef3c7,stroke:#b45309,color:#78350f;
+</div>
+<table>
+  <tr><th>Execution</th><th>Status transition (Postgres)</th><th>Meaning</th></tr>
+  <tr><td>was RUNNING at crash (id 6)</td><td><code>running → crashed → error</code></td><td>dropped, <b>not resumed</b></td></tr>
+  <tr><td>queued heavy job (id 7)</td><td><code>new → running → error</code></td><td>re-run from scratch, then failed</td></tr>
+</table>
+<pre><code>Last session crashed
+Found unfinished executions: 6
+[runnner:js] FATAL ERROR: ... JavaScript heap out of memory
+Node ran out of memory</code></pre>
+<div class="callout insight"><div class="t">💡 Two things to remember</div>
+<b>1.</b> The in-flight execution is <b>always dropped</b> — marked <code>crashed</code>/<code>error</code>. n8n does not checkpoint or resume a run mid-way.<br/>
+<b>2.</b> <b>Where the OOM lands decides whether the container even restarts:</b> a Code-node OOM kills the isolated <b>JS Task Runner</b> subprocess (worker survives, <code>restarts=0</code>). But an OOM in the <b>worker/main process itself</b> (buffering an upload, or serializing a huge result to save) kills the container — and with <code>restart: unless-stopped</code> + a retried heavy job, that becomes a <b>crash loop</b>.</div>
+</div>
+
+<!-- 16 -->
+<h2 id="s16"><span class="num">16</span>Failure-mode catalog — more ways each node dies</h2>
+<div class="card">
+<div class="callout danger"><div class="t">🃏 The UI-side poison pill: opening a big execution</div>
+When a run finishes, its <b>entire data</b> (all node outputs + inline base64 binary) is saved to Postgres. Opening it in the UI makes the
+<b>main</b> node load that whole blob into <em>its</em> heap and re-serialize it for the browser — so a big execution can <b>crash main every time you open it</b>.</div>
+<div class="mermaid">
+flowchart LR
+  U["👤 open execution&lt;br/&gt;in the UI"] --> M["main:&lt;br/&gt;GET /rest/executions/:id"]:::proc
+  M --> DB[("Postgres: execution_data&lt;br/&gt;29 MB … hundreds of MB")]:::db
+  DB -->|"load blob"| H["main deserializes to objects&lt;br/&gt;+ re-serializes for browser"]:::heap
+  H --> K["💥 main OOM&lt;br/&gt;(repeats every open)"]:::crash
+  classDef proc fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef db fill:#dcfce7,stroke:#15803d,color:#14532d;
+  classDef heap fill:#ede9fe,stroke:#7c3aed,color:#4c1d95,stroke-width:2px;
+  classDef crash fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px;
+</div>
+<p style="margin-top:6px">✅ = reproduced in this lab; others are the same heap mechanism via a different trigger.</p>
+<h3>Web (main) node</h3>
+<table>
+  <tr><th>Trigger</th><th>Why it dies</th></tr>
+  <tr><td>✅ Large file upload (webhook)</td><td>buffered + base64'd in heap before enqueue</td></tr>
+  <tr><td>Large JSON / HTTP body</td><td>body-parser buffers + <code>JSON.parse</code> in heap</td></tr>
+  <tr><td><b>Open a big execution in the UI</b></td><td>main loads the DB blob + re-serializes for the browser</td></tr>
+  <tr><td>Manual "Execute Workflow" in the editor</td><td>runs on <b>main</b> by default → heavy workflow OOMs main</td></tr>
+  <tr><td><code>responseMode: lastNode</code> returning big data</td><td>main holds/serializes the result to return it</td></tr>
+  <tr><td>High concurrency of webhook/API calls</td><td>many requests buffering at once</td></tr>
+  <tr><td>Many active workflows / large pinned or static data</td><td>held resident in main's memory</td></tr>
+</table>
+<h3>Worker node</h3>
+<table>
+  <tr><th>Trigger</th><th>Why it dies</th></tr>
+  <tr><td>✅ Build big array / millions of items</td><td>items + wrappers fill heap</td></tr>
+  <tr><td>✅ Serialize-to-save at finish</td><td>all node outputs → JSON/base64 → Postgres (the peak)</td></tr>
+  <tr><td>✅ Compounding runs</td><td>V8 keeps reserved memory → next big run starts high</td></tr>
+  <tr><td>✅ Code/Function node OOM</td><td>kills the <b>JS Task Runner</b> subprocess (worker usually survives)</td></tr>
+  <tr><td>Large HTTP response / DB query (millions of rows)</td><td>whole payload held in memory</td></tr>
+  <tr><td>Read large file into memory (default binary)</td><td>spreadsheet / PDF / CSV loaded fully</td></tr>
+  <tr><td>Split Out / Aggregate / Item Lists / Merge / Sort</td><td>materializes everything at once</td></tr>
+  <tr><td>High worker <code>--concurrency</code></td><td>N heavy runs share one heap → one bad run can OOM all of them</td></tr>
+  <tr><td>Execute Workflow (sub-workflow)</td><td>child data held in the parent's memory</td></tr>
+</table>
+<h3>Both / infrastructure</h3>
+<table>
+  <tr><th>Trigger</th><th>Result</th></tr>
+  <tr><td><code>mem_limit</code> ≥ heap cap</td><td>kernel / Cloud-Run kill → <b>exit 137, OOMKilled=true</b> (vs clean V8 134)</td></tr>
+  <tr><td>Cloud Run tmpfs (disk = RAM)</td><td>filesystem binary mode consumes RAM → instance killed</td></tr>
+  <tr><td><b>Event-loop blocked</b> (huge sync loop / <code>JSON.parse</code>)</td><td>liveness probe times out → orchestrator kills the container (no OOM needed)</td></tr>
+  <tr><td>Redis holding huge job payloads</td><td>queue / memory failures</td></tr>
+  <tr><td>Postgres <code>execution_data</code> bloat</td><td>degrades throughput; feeds the UI-open poison pill above</td></tr>
+</table>
+<div class="callout insight"><div class="t">💡 The one rule under all of it</div>
+Heap death happens wherever <b>big data is materialized or serialized</b>. In queue mode that's <b>main</b> for ingestion / UI / serialization, <b>worker</b> for execution, and the <b>task runner</b> for Code nodes.</div>
+</div>
+
+<!-- 17 -->
+<h2 id="s17"><span class="num">17</span>Prevention — proven <span style="font-size:14px;color:#64748b">(before / after, same loads)</span></h2>
+<div class="card">
+<p>We re-ran the <b>exact loads that crashed each node</b>, with one mitigation applied. Measured on the live stack.</p>
+
+<h3>Demo A — Web node: cap the input (<code>client_max_body_size 25m</code>)</h3>
+<div class="mermaid">
+flowchart LR
+  U["8 × 200 MB uploads"] --> NG["nginx&lt;br/&gt;client_max_body_size 25m"]:::proc
+  NG -->|"413 Too Large ×8"| X["rejected at the edge"]:::fix
+  NG -.->|"bytes never forwarded"| M["n8n-main&lt;br/&gt;heap stays 148 MB"]:::safe
+  classDef proc fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
+  classDef fix fill:#dcfce7,stroke:#15803d,color:#14532d;
+  classDef safe fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px;
+</div>
+<table>
+  <tr><th></th><th>Before (no cap)</th><th>After (25 MB cap)</th></tr>
+  <tr><td>Load</td><td>8 × 200 MB uploads</td><td><b>8 × 200 MB (identical)</b></td></tr>
+  <tr><td>HTTP result</td><td>200 (accepted)</td><td><span class="tag green">413 × 8</span> (rejected at nginx)</td></tr>
+  <tr><td>main heap</td><td>144 → <b>503 → 💥 crash</b></td><td><b>148 → 148 MB (flat)</b></td></tr>
+  <tr><td>main status</td><td><span class="tag red">exited 134</span></td><td><span class="tag green">running, exit 0</span></td></tr>
+</table>
+
+<h3>Demo B — Worker: don't materialize the dataset</h3>
+<table>
+  <tr><th></th><th>Before (return items)</th><th>After (return summary)</th></tr>
+  <tr><td>Load</td><td>600k items</td><td><b>100,000,000 processed (167×)</b></td></tr>
+  <tr><td>worker heap</td><td>climbed → <b>💥 OOM (exit 134)</b></td><td><b>119 → 122 MB (flat)</b></td></tr>
+  <tr><td>worker status</td><td><span class="tag red">crashed</span></td><td><span class="tag green">running, exit 0, restarts 0</span></td></tr>
+  <tr><td>execution</td><td><code>error</code></td><td><span class="tag green"><code>success</code></span></td></tr>
+</table>
+<div class="callout insight"><div class="t">💡 What the evidence shows</div>
+<b>Bounding the input</b> protects the <b>web node</b> — oversized bytes die at the edge (413), never reaching the heap.<br/>
+<b>Not materializing</b> protects the <b>worker</b> — heap tracks <em>what you hold</em>, not <em>what you process</em>. Hold a running total, not the dataset: 100 M processed fine; 600k <em>held as items</em> crashed.</div>
+</div>
+
+<!-- 18 -->
+<h2 id="s18"><span class="num">18</span>Prevention playbook <span style="font-size:14px;color:#64748b">(researched)</span></h2>
+<div class="card">
+<div class="callout warn"><div class="t">📌 Correction: a <code>database</code> binary mode exists</div>
+Per n8n's docs, <code>N8N_DEFAULT_BINARY_DATA_MODE</code> accepts <b><code>default</code>, <code>filesystem</code>, <code>s3</code>, and <code>database</code></b> — and for queue mode n8n recommends <code>database</code> (filesystem isn't supported with queue mode). Binary mode only affects <b>binary files</b>, not the JSON/array item data that causes most OOMs here.</div>
+
+<h3>🥇 Highest impact</h3>
+<table>
+  <tr><th>Fix</th><th>Prevents</th></tr>
+  <tr><td><b>Task runners in EXTERNAL mode</b> (<code>N8N_RUNNERS_MODE=external</code>, sidecar with its own heap)</td><td>Code-node OOMs + the runner memory <em>leak</em>; a bad Code node can't take down the worker</td></tr>
+  <tr><td><b>Batch + return small data</b> (Loop Over Items / Split In Batches, sub-workflows)</td><td>worker OOM from big arrays / large SQL / millions of items <span class="tag green">✅ proven</span></td></tr>
+  <tr><td><b>Don't save + prune executions</b> (<code>EXECUTIONS_DATA_SAVE_ON_SUCCESS=none</code>, <code>EXECUTIONS_DATA_PRUNE=true</code> + max age/count)</td><td>finish-serialize spike, the "open big execution" main crash, and DB bloat — all three</td></tr>
+</table>
+
+<h3>Storage · resources · limits · guardrails</h3>
+<table>
+  <tr><th>Fix</th><th>Prevents</th></tr>
+  <tr><td>Binary → <code>database</code> (queue mode) or <code>s3</code>; <code>N8N_BINARY_DATA_TTL</code>; trim data early (<code>Set</code> keep-only)</td><td>files/JSON eating heap</td></tr>
+  <tr><td><code>--max-old-space-size</code> below container <code>mem_limit</code>; many small workers &gt; one big; per-worker memory limits</td><td>kernel OOM-kill (137); uncontrolled spikes</td></tr>
+  <tr><td>Low concurrency (<code>N8N_CONCURRENCY_PRODUCTION_LIMIT</code> / <code>--concurrency</code> 5–10); Cloud Run <code>--concurrency</code></td><td>N heavy runs sharing one heap; collateral kills</td></tr>
+  <tr><td>Input caps: nginx <code>client_max_body_size</code>, <code>N8N_PAYLOAD_SIZE_MAX</code>, <code>N8N_FORMDATA_FILE_SIZE_MAX</code></td><td>oversized uploads reaching the web node <span class="tag green">✅ proven</span></td></tr>
+  <tr><td><code>OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS=true</code>; avoid <code>responseMode: lastNode</code> with big data</td><td>manual runs / big responses OOMing <b>main</b></td></tr>
+  <tr><td>Metrics on main + <b>every worker</b>, alert near the cap; keep n8n updated</td><td>flying blind; version-specific runner leaks</td></tr>
+</table>
+<p style="font-size:13.5px;color:#64748b;margin-top:10px"><b>Strategy:</b> isolate (external runners) → don't materialize (batch + trim + offload) → don't persist (no-save + prune) → bound (input + concurrency) → size &amp; watch (heap headroom + per-node metrics).</p>
+<p style="font-size:13px;color:#64748b">Sources: n8n Docs (memory errors, scaling, task runners, binary-data env vars); GitHub #15628/#13740/#15269/#16862/#1583; n8n community forum.</p>
+</div>
+
+<!-- 19 -->
+<h2 id="s19"><span class="num">19</span>Resilience &amp; scaling <span style="font-size:14px;color:#64748b">(beyond memory)</span></h2>
+<div class="card">
+<p>Researched across n8n docs, GitHub &amp; the forum; <b>two reproduced on this lab</b>. Defaults reconciled across sources.</p>
+
+<h3>✅ Reproduced — Queue backpressure</h3>
+<p>12 jobs (~5 s each) fired at a <code>--concurrency=1</code> worker. All webhooks returned 200 instantly (<code>onReceived</code>), but executions <b>sat "Queued"</b> while the single worker drained them one at a time:</p>
+<pre><code>baseline bull:jobs:wait = 0
+FIRE 12  → queued(new)=12,  bull:jobs:wait peaks at 12,  running=1
+drain    → 12 → 11 → 10 → 9 → 8 → 7 → 6 → 4 → 3 → 2 → 1 → 0   (~1 job / 5s)</code></pre>
+<p><b>Lesson:</b> arrival ≫ throughput → the Redis <code>bull:jobs:wait</code> list length is your backpressure gauge. Fix = more workers / higher concurrency (autoscale on that list).</p>
+
+<h3>✅ Reproduced — Execution timeout can't preempt sync CPU</h3>
+<table>
+  <tr><th>Setup</th><th>Expected</th><th>Actual (measured)</th></tr>
+  <tr><td><code>EXECUTIONS_TIMEOUT=10</code>, run a 30 s CPU busy-loop</td><td>killed at ~10 s</td><td><b>ran ~56 s</b>, then marked <code>error</code> — <span class="tag red">not preempted</span></td></tr>
+</table>
+<div class="callout warn"><div class="t">⚠️ Timeouts bound bookkeeping, not synchronous CPU</div>
+n8n is single-threaded — a busy <code>for</code>/<code>while</code> loop blocks the event loop, so the timeout callback can't fire until the loop finishes. <code>EXECUTIONS_TIMEOUT</code> works for <b>async/IO-bound</b> waits, but a CPU-bound loop runs to completion first. Same root as event-loop blocking below.</div>
+
+<h3>The non-memory kill-chain (why sync CPU is the worst case)</h3>
+<div class="mermaid">
+flowchart TD
+  B["synchronous CPU work&lt;br/&gt;(busy loop / huge JSON.parse / ReDoS)"]:::crash --> L["event loop blocked"]:::crash
+  L --> P["/healthz stops answering&lt;br/&gt;→ liveness probe timeout"]:::warn
+  L --> K["Bull job lock not renewed&lt;br/&gt;→ stalled → duplicate run"]:::warn
+  L --> T["EXECUTIONS_TIMEOUT can't preempt&lt;br/&gt;(ran 56s despite 10s cap)"]:::warn
+  P --> R["orchestrator restarts container&lt;br/&gt;CrashLoopBackOff — no OOM, no exit 134"]:::crash
+  classDef crash fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px;
+  classDef warn fill:#fef3c7,stroke:#b45309,color:#78350f;
+</div>
+
+<h3>Non-memory crash modes (briefing)</h3>
+<table>
+  <tr><th>Mode</th><th>Signature</th><th>Key knobs / fix</th></tr>
+  <tr><td>Event-loop blocking → probe kill</td><td><code>Liveness probe failed … deadline exceeded</code> → CrashLoopBackOff</td><td>keep task runners on; generous probe <code>timeoutSeconds</code>/<code>failureThreshold</code>; batch</td></tr>
+  <tr><td>Postgres pool exhaustion</td><td><code>FATAL: sorry, too many connections</code></td><td><code>DB_POSTGRESDB_POOL_SIZE</code> (def 2) × processes &lt; <code>max_connections</code> (def 100); PgBouncer</td></tr>
+  <tr><td>Postgres bloat</td><td>slow Executions UI, disk fills, dead tuples</td><td>pruning ON; <code>SAVE_ON_SUCCESS=none</code>; binary off-DB; autovacuum</td></tr>
+  <tr><td>Redis eviction / stalls</td><td>lost/duplicate jobs; <code>Missing lock for job</code></td><td>Redis <code>maxmemory-policy noeviction</code>; keep sync work &lt; <code>QUEUE_WORKER_LOCK_DURATION</code> (60 s)</td></tr>
+  <tr><td>Queue backpressure ✅</td><td>growing <code>bull:jobs:wait</code>; "Queued" execs; sync webhooks time out</td><td>autoscale workers on queue depth; <code>N8N_CONCURRENCY_PRODUCTION_LIMIT</code></td></tr>
+</table>
+
+<h3>Reliability features (briefing)</h3>
+<table>
+  <tr><th>Feature</th><th>What / defaults</th></tr>
+  <tr><td>Error Workflow</td><td>Error Trigger node + per-workflow setting; fires on <b>production</b> failures; gets <code>{execution, workflow}</code>; runs as a queued execution</td></tr>
+  <tr><td>Node retry</td><td>Retry On Fail: <code>maxTries</code> 3 (2–5), <code>waitBetweenTries</code> 1000 ms (max 5000)</td></tr>
+  <tr><td>Stalled-job retry</td><td><code>QUEUE_WORKER_MAX_STALLED_COUNT=1</code> → one re-run <b>from scratch</b> (no resume) → design idempotent</td></tr>
+  <tr><td>Timeout ⚠️</td><td><code>EXECUTIONS_TIMEOUT=-1</code> / <code>_MAX=3600</code>; enforced on worker; <b>can't preempt sync CPU</b> (reproduced)</td></tr>
+  <tr><td>Graceful shutdown</td><td><code>N8N_GRACEFUL_SHUTDOWN_TIMEOUT=30 s</code> drain on SIGTERM; set k8s grace ≥ this; <code>QUEUE_RECOVERY_INTERVAL=60 s</code></td></tr>
+</table>
+
+<h3>Scaling topologies (briefing)</h3>
+<table>
+  <tr><th>Topology</th><th>How / gate</th></tr>
+  <tr><td>Multi-main</td><td><code>N8N_MULTI_MAIN_SETUP_ENABLED</code>; leader owns cron/poll triggers; needs sticky-session LB for editor websocket — <span class="tag amber">Enterprise-only</span></td></tr>
+  <tr><td>Webhook processors</td><td><code>n8n webhook</code> instances + <code>N8N_DISABLE_PRODUCTION_MAIN_PROCESS=true</code> on main; own round-robin LB — <span class="tag green">Community</span></td></tr>
+  <tr><td>Autoscaling workers</td><td>scale replicas on <code>LLEN bull:jobs:wait</code> (KEDA Redis scaler); <code>--concurrency</code> 5–10; cap replicas so <code>replicas × concurrency &lt; max_connections</code> — <span class="tag green">Community</span></td></tr>
+  <tr><td>Reference (large)</td><td>multi-main (Ent) + webhook procs + autoscaled workers (+1:1 runners) + HA Redis (noeviction) + HA Postgres + S3 binary</td></tr>
+</table>
+<p style="font-size:13px;color:#64748b">Sources: n8n docs (scaling/queue-mode, task-runners, executions, concurrency, env-var reference), GitHub issues (#13740/#15628/#16862), n8n community forum, KEDA/Redis autoscaling projects. A few exact numeric defaults are version-dependent — verify against your n8n version.</p>
+</div>
+
+<!-- 20 -->
+<h2 id="s20"><span class="num">20</span>Lab State &amp; Files Changed</h2>
+<div class="card">
+<div class="callout fix">
+  <div class="t">✓ Reverted to production shape</div>
+  The debug config used during the investigation has been rolled back: both nodes are back to <code>restart: unless-stopped</code>, the <code>--heapsnapshot-*</code> <code>NODE_OPTIONS</code> and <code>EXECUTIONS_TIMEOUT=10</code> are removed, and the worker is back to default concurrency. The stack is stopped (<code>docker compose down</code>; data volumes kept). <code>heapdump.heapsnapshot</code> (146 MB) was captured, then deleted.
+</div>
+<table>
+  <tr><th>File</th><th>State now</th></tr>
+  <tr><td><code>docker-compose.yml</code></td><td>debug flags (<code>restart:"no"</code>, snapshot <code>NODE_OPTIONS</code>, worker <code>--concurrency=1</code>, <code>EXECUTIONS_TIMEOUT=10</code>) <b>reverted</b> · <b>kept:</b> worker <code>N8N_METRICS</code> + host port <code>5679</code></td></tr>
+  <tr><td><code>nginx/nginx.conf</code></td><td><b>kept:</b> <code>client_max_body_size 0 → 25m</code> (a real prevention — tune to your max upload)</td></tr>
+  <tr><td><code>monitoring/prometheus.yml</code></td><td><b>kept:</b> <code>n8n-worker</code> scrape target (closed the worker blind spot)</td></tr>
+  <tr><td><code>workflows/*.json</code></td><td>created: <code>upload-oom</code>, <code>generate-items</code>, <code>gc-test</code>, <code>slow-run</code>, <code>slow-med</code>, <code>generate-summary</code> (+ <code>id</code> added to upload-oom)</td></tr>
+  <tr><td><code>.gitignore</code></td><td>added <code>*.heapsnapshot</code></td></tr>
+  <tr><td>docs</td><td>created: <code>OOM-explained.md</code>, <code>n8n-oom-report.html</code>, <code>n8n-oom-evidence.html</code>, <code>n8n-oom-diagram.svg</code>, <code>n8n-worker-oom-diagram.svg</code></td></tr>
+</table>
+<div class="callout info">
+  <div class="t">↺ To reproduce again</div>
+  Start Docker Desktop → <code>docker compose up -d</code> (data is still in the volumes). To re-run a specific demo, re-apply its debug flag (e.g. worker <code>restart:"no"</code> + <code>--concurrency=1</code>) as noted in the exhibits.
+</div>
+</div>
+
+<!-- 21 -->
+<h2 id="s21"><span class="num">21</span>Quick Reference</h2>
+<div class="card">
+<h3>Crash-signature cheat-sheet</h3>
+<table>
+  <tr><th>You see</th><th>Meaning</th></tr>
+  <tr><td><code>JavaScript heap out of memory</code>, exit <b>134</b>, <code>OOMKilled=false</code></td><td>V8 hit <code>--max-old-space-size</code> first (what we reproduced)</td></tr>
+  <tr><td>killed, exit <b>137</b>, <code>OOMKilled=true</code></td><td>kernel / Cloud Run memory limit hit first (heap cap ≥ container memory)</td></tr>
+</table>
+<h3>Key env vars</h3>
+<table>
+  <tr><th>Variable</th><th>Purpose</th></tr>
+  <tr><td><code>EXECUTIONS_MODE=queue</code></td><td>enable queue (scaling) mode</td></tr>
+  <tr><td><code>N8N_DEFAULT_BINARY_DATA_MODE</code></td><td><code>default</code> / <code>filesystem</code> / <code>s3</code></td></tr>
+  <tr><td><code>N8N_PAYLOAD_SIZE_MAX</code>, <code>N8N_FORMDATA_FILE_SIZE_MAX</code></td><td>cap request / upload size (MB)</td></tr>
+  <tr><td><code>N8N_METRICS=true</code></td><td>expose <code>/metrics</code> (enable on <b>worker</b> too!)</td></tr>
+  <tr><td><code>OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS=true</code></td><td>run manual executions on workers, not main</td></tr>
+</table>
+<h3>Handy commands</h3>
+<pre><code>curl -s http://localhost:8080/metrics | grep n8n_nodejs_heap_size_used_bytes
+docker inspect n8n-n8n-main-1 --format '{{.State.Status}} {{.State.ExitCode}} {{.State.OOMKilled}}'
+docker logs n8n-n8n-main-1 | grep -A5 "Last few GCs"</code></pre>
+</div>
+
+<div class="foot">
+  Generated from the investigation session · n8n v2.28.4 · queue mode · nginx · Prometheus /metrics<br/>
+  Measured on a 512 MB heap cap. Numbers (heap 145→503 MB, 77% strings, exit 134) are from live <code>/metrics</code> and a V8 heap snapshot.<br/>
+  <b>Last synced: 2026-07-02</b> · config reverted to production shape · stack stopped.
+</div>
+
+</div>
+</body>
+</html>

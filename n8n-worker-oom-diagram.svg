@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 880" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="wa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <marker id="wp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/>
+    </marker>
+  </defs>
+  <rect width="1280" height="880" fill="#f7f8fa"/>
+
+  <!-- Header -->
+  <text x="40" y="46" font-size="29" font-weight="700" fill="#0f172a">n8n Worker-Node OOM — reproduce · system · why it crashes</text>
+  <text x="40" y="72" font-size="15" fill="#64748b">Queue mode · the worker executes queued jobs · V8 heap capped at 512 MB · n8n v2.28.4</text>
+  <line x1="40" y1="88" x2="1240" y2="88" stroke="#e2e8f0" stroke-width="2"/>
+
+  <!-- ============ BAND 1+2 : REPRODUCE + SYSTEM ============ -->
+  <text x="40" y="120" font-size="18" font-weight="700" fill="#7c3aed">① REPRODUCE &#160;→&#160; ② THE SYSTEM (queue mode)</text>
+
+  <!-- build -->
+  <rect x="40" y="142" width="196" height="120" rx="12" fill="#fff" stroke="#dc2626" stroke-width="2"/>
+  <text x="138" y="168" text-anchor="middle" font-size="14" font-weight="700" fill="#991b1b">① BUILD</text>
+  <text x="138" y="192" text-anchor="middle" font-size="14" font-weight="700" fill="#0f172a">Code node builds</text>
+  <text x="138" y="212" text-anchor="middle" font-size="15" font-weight="700" fill="#0f172a">[1, 2, 3, … x] items</text>
+  <text x="138" y="238" text-anchor="middle" font-size="11.5" fill="#64748b">production run · 600k = OOM</text>
+
+  <line x1="236" y1="202" x2="286" y2="202" stroke="#475569" stroke-width="2.5" marker-end="url(#wa)"/>
+
+  <!-- main -->
+  <rect x="290" y="150" width="168" height="104" rx="12" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="374" y="184" text-anchor="middle" font-size="15" font-weight="700" fill="#1e3a8a">n8n-main</text>
+  <text x="374" y="206" text-anchor="middle" font-size="12" fill="#1e40af">enqueues the job</text>
+  <text x="374" y="226" text-anchor="middle" font-size="11.5" font-weight="600" fill="#991b1b">does NOT execute it</text>
+
+  <line x1="458" y1="202" x2="504" y2="202" stroke="#475569" stroke-width="2.5" marker-end="url(#wa)"/>
+  <text x="481" y="192" text-anchor="middle" font-size="11" fill="#64748b">enqueue</text>
+
+  <!-- redis -->
+  <rect x="508" y="168" width="126" height="68" rx="12" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
+  <text x="571" y="198" text-anchor="middle" font-size="14" font-weight="700" fill="#78350f">Redis</text>
+  <text x="571" y="218" text-anchor="middle" font-size="11.5" fill="#92400e">Bull queue</text>
+
+  <line x1="634" y1="202" x2="680" y2="202" stroke="#475569" stroke-width="2.5" marker-end="url(#wa)"/>
+
+  <!-- worker (star) -->
+  <rect x="684" y="140" width="242" height="124" rx="12" fill="#ede9fe" stroke="#7c3aed" stroke-width="3"/>
+  <text x="805" y="168" text-anchor="middle" font-size="16" font-weight="700" fill="#4c1d95">n8n-worker · EXECUTES</text>
+  <text x="805" y="190" text-anchor="middle" font-size="12" fill="#5b21b6">runs the Code node · heap cap 512 MB</text>
+  <rect x="726" y="204" width="158" height="30" rx="8" fill="#fee2e2" stroke="#dc2626"/>
+  <text x="805" y="224" text-anchor="middle" font-size="13" font-weight="700" fill="#991b1b">★ crashes HERE</text>
+
+  <line x1="926" y1="185" x2="972" y2="185" stroke="#475569" stroke-width="2.5" marker-end="url(#wa)"/>
+  <text x="949" y="175" text-anchor="middle" font-size="11" fill="#64748b">save</text>
+
+  <!-- postgres -->
+  <rect x="976" y="150" width="224" height="68" rx="12" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+  <text x="1088" y="180" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">Postgres</text>
+  <text x="1088" y="200" text-anchor="middle" font-size="11.5" fill="#166534">execution data saved</text>
+
+  <!-- zoom down -->
+  <line x1="805" y1="264" x2="805" y2="316" stroke="#7c3aed" stroke-width="3" marker-end="url(#wp)"/>
+  <text x="823" y="296" font-size="13" font-weight="600" fill="#7c3aed">zoom into its heap ↓</text>
+
+  <!-- ============ BAND 3 : WHY ============ -->
+  <rect x="40" y="324" width="1200" height="404" rx="16" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>
+  <text x="64" y="358" font-size="18" font-weight="700" fill="#7c3aed">③ WHY IT CRASHES — inside the worker</text>
+  <text x="64" y="380" font-size="13.5" fill="#64748b">Heap tracks what you HOLD, not what you process. Three things pile up:</text>
+
+  <!-- what fills the heap -->
+  <rect x="64" y="398" width="452" height="176" rx="12" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="290" y="424" text-anchor="middle" font-size="14" font-weight="700" fill="#4c1d95">What fills the heap</text>
+  <text x="86" y="454" font-size="13" fill="#4c1d95">1 · <tspan font-weight="700">x items held</tspan> — each a { json: {…} } object</text>
+  <text x="86" y="486" font-size="13" fill="#4c1d95">2 · n8n keeps <tspan font-weight="700">EVERY node's output</tspan> for the run</text>
+  <text x="86" y="518" font-size="13" fill="#4c1d95">3 · finish: <tspan font-weight="700">base64/JSON serialize</tspan> → save to DB</text>
+  <text x="86" y="548" font-size="11.5" fill="#7c3aed">(step 3 is the peak — often where it OOMs)</text>
+
+  <!-- escalation bars -->
+  <text x="548" y="418" font-size="13.5" font-weight="700" fill="#0f172a">measured heap_used by run size (MB), cap 512:</text>
+  <!-- scale: x=548..968 = 0..560MB ; 1MB=0.75px ; cap 512 -> 548+384=932 -->
+  <line x1="932" y1="430" x2="932" y2="556" stroke="#dc2626" stroke-width="2.5" stroke-dasharray="6 4"/>
+  <text x="938" y="446" font-size="12" font-weight="700" fill="#dc2626">512 💥</text>
+  <!-- 100k -->
+  <text x="548" y="454" font-size="12" fill="#334155">100k</text>
+  <rect x="592" y="440" width="111" height="22" rx="5" fill="#22c55e"/>
+  <text x="712" y="456" font-size="12" font-weight="700" fill="#15803d">148 → GC drop 114 ✓ survives</text>
+  <!-- 300k -->
+  <text x="548" y="492" font-size="12" fill="#334155">300k</text>
+  <rect x="592" y="478" width="153" height="22" rx="5" fill="#f59e0b"/>
+  <text x="754" y="494" font-size="12" font-weight="700" fill="#b45309">204 · RSS 465 stays high ↑</text>
+  <!-- 600k -->
+  <text x="548" y="530" font-size="12" fill="#334155">600k</text>
+  <rect x="592" y="516" width="340" height="22" rx="5" fill="#ef4444"/>
+  <text x="726" y="532" font-size="12" font-weight="700" fill="#fff">→ 512 · OOM 💥</text>
+  <text x="548" y="562" font-size="11.5" fill="#64748b">RSS stays elevated after finish → the next big run starts high → compounds.</text>
+
+  <!-- FATAL -->
+  <rect x="988" y="398" width="212" height="176" rx="12" fill="#fee2e2" stroke="#dc2626" stroke-width="2.5"/>
+  <text x="1094" y="426" text-anchor="middle" font-size="15" font-weight="700" fill="#991b1b">💥 FATAL</text>
+  <text x="1094" y="452" text-anchor="middle" font-size="12.5" font-weight="700" fill="#7f1d1d">JavaScript heap</text>
+  <text x="1094" y="470" text-anchor="middle" font-size="12.5" font-weight="700" fill="#7f1d1d">out of memory</text>
+  <text x="1094" y="500" text-anchor="middle" font-size="12" fill="#991b1b">exit 134</text>
+  <text x="1094" y="524" text-anchor="middle" font-size="11" fill="#991b1b">or [runner:js] FATAL</text>
+  <text x="1094" y="548" text-anchor="middle" font-size="11" fill="#991b1b">Node ran out of memory</text>
+
+  <!-- two crash sites -->
+  <rect x="64" y="592" width="1136" height="66" rx="10" fill="#fff7ed" stroke="#b45309"/>
+  <text x="84" y="616" font-size="13.5" font-weight="700" fill="#92400e">Where the OOM lands decides what dies:</text>
+  <text x="84" y="638" font-size="12.5" fill="#7c2d12">(a) Code-node build → the isolated <tspan font-weight="700">JS Task Runner</tspan> dies, worker SURVIVES (execution = error, restarts=0).</text>
+  <text x="84" y="654" font-size="12.5" fill="#7c2d12">(b) worker <tspan font-weight="700">holds/serializes</tspan> the big result → the <tspan font-weight="700">worker process</tspan> itself crashes (exit 134).</text>
+
+  <!-- root cause line -->
+  <rect x="64" y="674" width="1136" height="40" rx="10" fill="#f5f3ff" stroke="#7c3aed"/>
+  <text x="82" y="699" font-size="14" fill="#4c1d95"><tspan font-weight="700">Root cause:</tspan> n8n materializes and retains all items in memory (no streaming between nodes); big enough datasets exceed the 512 MB heap.</text>
+
+  <!-- ============ PREVENT ============ -->
+  <rect x="40" y="738" width="1200" height="46" rx="10" fill="#dcfce7" stroke="#15803d" stroke-width="2"/>
+  <text x="60" y="766" font-size="14" fill="#14532d"><tspan font-weight="700">FIX ✓</tspan>  batch (Loop Over Items / SplitInBatches)  ·  return a summary, not the dataset  ·  external task runners  ·  don't save execution data  ·  low --concurrency</text>
+
+  <!-- Legend -->
+  <text x="40" y="826" font-size="13" font-weight="700" fill="#0f172a">Legend:</text>
+  <rect x="108" y="815" width="16" height="16" rx="3" fill="#ede9fe" stroke="#7c3aed"/><text x="130" y="828" font-size="12.5" fill="#334155">V8 heap (capped)</text>
+  <rect x="258" y="815" width="16" height="16" rx="3" fill="#fef3c7" stroke="#b45309"/><text x="280" y="828" font-size="12.5" fill="#334155">queue / storage</text>
+  <rect x="398" y="815" width="16" height="16" rx="3" fill="#dbeafe" stroke="#2563eb"/><text x="420" y="828" font-size="12.5" fill="#334155">process</text>
+  <rect x="498" y="815" width="16" height="16" rx="3" fill="#fee2e2" stroke="#dc2626"/><text x="520" y="828" font-size="12.5" fill="#334155">crash</text>
+  <rect x="578" y="815" width="16" height="16" rx="3" fill="#dcfce7" stroke="#15803d"/><text x="600" y="828" font-size="12.5" fill="#334155">fix</text>
+  <text x="1240" y="828" text-anchor="end" font-size="12" fill="#94a3b8">measured on lab · n8n v2.28.4 · heap cap 512 MB · synced 2026-07-02</text>
+</svg>

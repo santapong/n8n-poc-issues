@@ -13,3 +13,10 @@ Thumbs.db
 
 # Heap dumps from OOM investigation
 *.heapsnapshot
+
+# large JSON OOM payload
+.oom-payload.json
+big.pdf
+medium.pdf
+max.pdf
+oom.pdf

@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>n8n OOM — Technical Report</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --ink:#e6edf3; --muted:#9aa7b4;
+    --line:#2d333b; --accent:#4f9dff; --good:#3fb950; --bad:#f85149; --warn:#d29922;
+    --purple:#a371f7; --code:#0b0f14;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f6f8fa; --panel:#fff; --panel2:#eef1f5; --ink:#1f2328; --muted:#5a6570;
+           --line:#d0d7de; --accent:#0969da; --good:#1a7f37; --bad:#cf222e; --warn:#9a6700;
+           --purple:#8250df; --code:#eef1f5;}
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 20px 100px}
+  header.hero{padding:40px 32px 30px;margin:24px 0 10px;border:1px solid var(--line);border-radius:16px;
+    background:linear-gradient(160deg,var(--panel),var(--panel2))}
+  h1{font-size:30px;margin:0 0 8px;letter-spacing:-.4px}
+  h2{font-size:22px;margin:44px 0 14px;padding-top:14px;border-top:2px solid var(--line);scroll-margin-top:20px}
+  h3{font-size:17px;margin:26px 0 8px}
+  .sub{color:var(--muted);font-size:15px}
+  .tags{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap}
+  .tag{font-size:12px;padding:3px 11px;border-radius:20px;border:1px solid var(--line);background:var(--panel);color:var(--muted)}
+  nav.toc{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px 22px;margin:18px 0 8px;
+    columns:2;column-gap:32px}
+  @media(max-width:640px){nav.toc{columns:1}}
+  nav.toc a{color:var(--accent);text-decoration:none;font-size:13.5px;display:block;padding:3px 0;break-inside:avoid}
+  nav.toc a:hover{text-decoration:underline}
+  nav.toc .n{color:var(--muted);display:inline-block;width:22px}
+  p{margin:11px 0}
+  .lead{font-size:16px}
+  .fig{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:18px;margin:20px 0}
+  .fig figcaption{color:var(--muted);font-size:13px;margin-top:10px;text-align:center}
+  svg{max-width:100%;height:auto;display:block;margin:0 auto}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);font-weight:600}
+  td.num,th.num{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+  code{background:var(--code);padding:1px 6px;border-radius:5px;font-size:13px;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;
+    font-size:12.5px;line-height:1.55;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  pre .r{color:var(--bad)} pre .g{color:var(--good)} pre .m{color:var(--muted)} pre .a{color:var(--accent)} pre .y{color:var(--warn)}
+  .callout{border-left:4px solid var(--accent);background:var(--panel);border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .callout.bad{border-color:var(--bad)} .callout.good{border-color:var(--good)} .callout.warn{border-color:var(--warn)}
+  .callout .h{font-weight:700;margin-bottom:3px}
+  ul,ol{margin:10px 0 10px 2px;padding-left:22px} li{margin:5px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:720px){.grid2{grid-template-columns:1fr}}
+  .kpi{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+  .kpi .c{flex:1 1 150px;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:14px 16px}
+  .kpi .k{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+  .kpi .v{font-size:22px;font-weight:700;margin-top:3px}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px}
+  .pill.g{background:color-mix(in srgb,var(--good) 18%,transparent);color:var(--good)}
+  .pill.b{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+  .pill.w{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}
+  .foot{color:var(--muted);font-size:12.5px;margin-top:44px;border-top:1px solid var(--line);padding-top:18px}
+  .anchor{scroll-margin-top:20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>n8n Out-of-Memory</h1>
+  <div class="sub">Investigation, Root-Cause Analysis &amp; Remediation · queue mode · n8n 2.28.6</div>
+  <div class="tags">
+    <span class="tag">EXECUTIONS_MODE=queue</span>
+    <span class="tag">main + worker · 512 MB heap</span>
+    <span class="tag">container 1024 MB</span>
+    <span class="tag">Postgres 16 · Redis 7 · nginx</span>
+    <span class="tag">engineering deep-dive</span>
+    <span class="tag">reproduced &amp; measured live</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#s1"><span class="n">1</span>Executive summary</a>
+  <a href="#s2"><span class="n">2</span>Environment &amp; architecture</a>
+  <a href="#s3"><span class="n">3</span>Data model — what n8n stores</a>
+  <a href="#s4"><span class="n">4</span>Lifecycle: upload → persist</a>
+  <a href="#s5"><span class="n">5</span>OOM reproductions (measured)</a>
+  <a href="#s6"><span class="n">6</span>Memory mechanics</a>
+  <a href="#s7"><span class="n">7</span>Crash-signature reference</a>
+  <a href="#s8"><span class="n">8</span>RCA — store vs not-store</a>
+  <a href="#s9"><span class="n">9</span>Prevention &amp; remediation</a>
+  <a href="#s10"><span class="n">10</span>Observability tooling</a>
+  <a href="#s11"><span class="n">11</span>Recommendations &amp; action plan</a>
+  <a href="#s12"><span class="n">12</span>Appendix</a>
+</nav>
+
+<!-- ══════════════ 1 ══════════════ -->
+<h2 id="s1" class="anchor">1 · Executive summary</h2>
+<p class="lead">The n8n web node and worker can be driven to a <strong>JavaScript heap out-of-memory</strong> crash under large or concurrent payloads. We reproduced both, measured them live, and traced the mechanism to the object level. The core cause is that payload bytes transit the Node/V8 heap (uploaded files become a base64 <em>string</em> on the heap; Code-node arrays materialize on the runner heap), and demand scales as <code>concurrency × size</code>.</p>
+
+<div class="kpi">
+  <div class="c"><div class="k">Web-node OOM</div><div class="v">RSS 300→1024 MB <span class="pill b">crash</span></div><div class="sub" style="font-size:12px">kernel cgroup kill under concurrent large JSON</div></div>
+  <div class="c"><div class="k">Worker/runner OOM</div><div class="v">heap →559 MB <span class="pill b">V8 abort</span></div><div class="sub" style="font-size:12px">5 M-item Code-node array</div></div>
+  <div class="c"><div class="k">Upload in heap</div><div class="v">80% strings</div><div class="sub" style="font-size:12px">120 MB PDF → 160 MB base64 string</div></div>
+  <div class="c"><div class="k">Data loss on hard OOM</div><div class="v">0 rows saved</div><div class="sub" style="font-size:12px">process dies before DB write</div></div>
+</div>
+
+<p><strong>Top findings</strong></p>
+<ol>
+  <li><strong>Two distinct failure modes.</strong> A <em>caught</em> OOM (in a child JS Task Runner or a downstream service) is recorded as <code>status=error</code>; a <em>hard</em> OOM of the n8n process itself loses the execution entirely. That is the whole "sometimes it stores, sometimes it doesn't."</li>
+  <li><strong>"OutOfMemoryError: Java heap space" is not n8n.</strong> Node reports <code>JavaScript heap out of memory</code>; a JVM message means a <strong>downstream Java service</strong> your workflow calls ran out of heap — a separate problem.</li>
+  <li><strong>Binary uploads live on the heap as base64</strong> in <code>default</code> mode (~1.37× file size), then are written into <code>execution_data</code>. This is the upload OOM path.</li>
+  <li><strong>Prevention needs both terms of the formula.</strong> Size limits alone are insufficient; concurrency must also be bounded, and — best of all — large binary kept off the heap entirely.</li>
+</ol>
+
+<div class="callout"><span class="h">Headline recommendation</span>
+Bound <em>size</em> (nginx + n8n) <strong>and</strong> <em>concurrency</em>, move large binary <strong>off-heap</strong> (filesystem/S3 or object-storage upload), size the heap from the formula <code>heap ≥ concurrency × max_MB × 2.3</code>, and fix the downstream Java service independently. "Scale up" is a derived number, not a standalone fix.</div>
+
+<!-- ══════════════ 2 ══════════════ -->
+<h2 id="s2" class="anchor">2 · Environment &amp; architecture under test</h2>
+<figure class="fig">
+<svg viewBox="0 0 920 320" role="img" aria-label="Architecture">
+  <defs><marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#9aa7b4"/></marker></defs>
+  <style>
+    .bx{fill:var(--panel2);stroke:var(--line);stroke-width:1.5}
+    .lb{fill:var(--ink);font:600 13px sans-serif} .sm{fill:var(--muted);font:11px sans-serif}
+    .fl{stroke:#9aa7b4;stroke-width:1.6;fill:none;marker-end:url(#ah)}
+  </style>
+  <rect class="bx" x="16" y="132" width="96" height="52" rx="9"/><text class="lb" x="64" y="154" text-anchor="middle">client</text><text class="sm" x="64" y="171" text-anchor="middle">browser / curl</text>
+  <rect class="bx" x="150" y="132" width="110" height="52" rx="9"/><text class="lb" x="205" y="154" text-anchor="middle">nginx :8080</text><text class="sm" x="205" y="171" text-anchor="middle">edge / proxy</text>
+  <rect class="bx" x="300" y="104" width="180" height="108" rx="10"/><text class="lb" x="390" y="128" text-anchor="middle">n8n-main (web)</text><text class="sm" x="390" y="146" text-anchor="middle">UI · REST · webhooks</text><text class="sm" x="390" y="162" text-anchor="middle">512 MB heap · /metrics</text><text class="sm" x="390" y="196" text-anchor="middle" style="fill:var(--bad)">← OOM path A (uploads/JSON)</text>
+  <rect class="bx" x="540" y="34" width="150" height="52" rx="9"/><text class="lb" x="615" y="56" text-anchor="middle">Postgres 16</text><text class="sm" x="615" y="72" text-anchor="middle">execution_data · binary_data</text>
+  <rect class="bx" x="540" y="132" width="150" height="52" rx="9"/><text class="lb" x="615" y="154" text-anchor="middle">Redis 7</text><text class="sm" x="615" y="171" text-anchor="middle">Bull queue (jobs)</text>
+  <rect class="bx" x="540" y="228" width="360" height="74" rx="10" style="stroke:var(--bad)"/><text class="lb" x="576" y="252" text-anchor="start">n8n-worker · 512 MB heap</text>
+  <rect x="720" y="238" width="168" height="54" rx="8" style="fill:color-mix(in srgb,var(--bad) 13%,transparent);stroke:var(--bad)"/><text class="lb" x="804" y="259" text-anchor="middle" style="fill:var(--bad)">JS Task Runner</text><text class="sm" x="804" y="276" text-anchor="middle">Code node · own heap</text>
+  <text class="sm" x="576" y="290" style="fill:var(--bad)">← OOM path B (arrays)</text>
+  <line class="fl" x1="112" y1="158" x2="148" y2="158"/><line class="fl" x1="260" y1="158" x2="298" y2="158"/>
+  <line class="fl" x1="480" y1="130" x2="538" y2="70"/><line class="fl" x1="480" y1="158" x2="538" y2="158"/>
+  <line class="fl" x1="615" y1="184" x2="615" y2="226"/><text class="sm" x="626" y="210">dequeue</text>
+</svg>
+<figcaption>Figure 1 — Queue-mode topology. Two independent heaps (main, worker); the worker spawns a JS Task Runner subprocess with a <em>third</em> heap for Code nodes. Container memory limit (1024 MB) sits above each 512 MB V8 cap.</figcaption>
+</figure>
+
+<table>
+  <thead><tr><th>Component</th><th>Role</th><th>Memory ceiling</th></tr></thead>
+  <tbody>
+    <tr><td>n8n-main</td><td>UI, REST API, webhook ingest, enqueue</td><td>512 MB V8 heap / 1024 MB container</td></tr>
+    <tr><td>n8n-worker</td><td>dequeues &amp; executes; spawns JS Task Runner</td><td>512 MB V8 heap / 1024 MB container</td></tr>
+    <tr><td>JS Task Runner</td><td>runs Code-node JS in isolation</td><td>own V8 heap (inherits cap)</td></tr>
+    <tr><td>Postgres / Redis</td><td>durable execution store / Bull job queue</td><td>—</td></tr>
+    <tr><td>nginx</td><td>edge proxy; streams request bodies</td><td>—</td></tr>
+  </tbody>
+</table>
+<p>Key config: <code>NODE_OPTIONS=--max-old-space-size=512</code>, <code>N8N_DEFAULT_BINARY_DATA_MODE=default</code>, <code>N8N_PAYLOAD_SIZE_MAX=256</code>, container <code>mem_limit=1024m</code>. The container ceiling sits <em>above</em> the heap cap so V8 can abort first — but under enough off-heap pressure the kernel cgroup limit is hit instead (see §7).</p>
+
+<!-- ══════════════ 3 ══════════════ -->
+<h2 id="s3" class="anchor">3 · Data model — what n8n stores</h2>
+<p>n8n created <strong>110 tables</strong>. Executions touch this subset; the pending queue itself lives in <strong>Redis</strong>, not Postgres.</p>
+<table>
+  <thead><tr><th>Table</th><th>Holds</th><th>Notable columns</th></tr></thead>
+  <tbody>
+    <tr><td><code>execution_entity</code></td><td>one row per run</td><td><code>status</code>, <code>mode</code>, <code>storedAt</code> (db/fs/s3/az), <code>jsonSizeBytes</code>, <code>binaryDataSizeBytes</code></td></tr>
+    <tr><td><code>execution_data</code></td><td>the run payload</td><td><code>data</code> (text — inputs/outputs), <code>workflowData</code> (json)</td></tr>
+    <tr><td><code>binary_data</code></td><td>files as blobs (fs/s3/db-ref modes)</td><td><code>data</code> <strong>bytea</strong>, <code>fileName</code>, <code>mimeType</code>, <code>fileSize</code></td></tr>
+    <tr><td><code>webhook_entity</code></td><td>registered webhook routes</td><td><code>webhookPath</code>, <code>method</code>, <code>workflowId</code></td></tr>
+    <tr><td><code>workflow_entity</code></td><td>the workflow definition</td><td><code>nodes</code>, <code>connections</code>, <code>active</code> (all json)</td></tr>
+  </tbody>
+</table>
+
+<h3>How an uploaded file is stored (proven)</h3>
+<p>In <code>default</code> binary mode the file is <strong>base64-encoded inline into <code>execution_data.data</code></strong> — counted in <code>jsonSizeBytes</code>, with <code>binaryDataSizeBytes=0</code> and the <code>binary_data</code> table empty (that table is used only by fs/s3/db-reference modes). Verified with a real 90 MB PDF:</p>
+<table>
+  <thead><tr><th></th><th class="num">Original</th><th class="num">Stored in DB (execution 11)</th></tr></thead>
+  <tbody>
+    <tr><td>bytes</td><td class="num">94,371,487</td><td class="num">94,371,487 (decoded)</td></tr>
+    <tr><td>base64 chars</td><td class="num">—</td><td class="num">125,828,652 (<code>jsonSizeBytes</code> ≈ 120 MB)</td></tr>
+    <tr><td>md5</td><td class="num"><code>70aa4cb7…b9b0</code></td><td class="num"><code>70aa4cb7…b9b0</code> <span class="pill g">exact match</span></td></tr>
+    <tr><td>valid PDF after round-trip?</td><td class="num">yes</td><td class="num">yes — pdfinfo: 1 page</td></tr>
+  </tbody>
+</table>
+<div class="callout good"><span class="h">Conclusion</span> A successful upload stores the file <strong>completely and losslessly</strong> (base64 in <code>execution_data</code>). A crashed upload stores <strong>nothing</strong> — see §8.</div>
+
+<!-- ══════════════ 4 ══════════════ -->
+<h2 id="s4" class="anchor">4 · Lifecycle: upload → execute → persist</h2>
+<figure class="fig">
+<svg viewBox="0 0 920 200" role="img" aria-label="Lifecycle">
+  <defs><marker id="ah2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#9aa7b4"/></marker></defs>
+  <style>.st{fill:var(--panel2);stroke:var(--line);stroke-width:1.4}.t{fill:var(--ink);font:600 12px sans-serif}.d{fill:var(--muted);font:10.5px sans-serif}.f{stroke:#9aa7b4;stroke-width:1.5;fill:none;marker-end:url(#ah2)}</style>
+  <rect class="st" x="10" y="70" width="120" height="60" rx="8"/><text class="t" x="70" y="94" text-anchor="middle">1 · ingest</text><text class="d" x="70" y="110" text-anchor="middle">nginx → main</text>
+  <rect class="st" x="160" y="55" width="150" height="90" rx="8" style="stroke:var(--bad)"/><text class="t" x="235" y="80" text-anchor="middle">2 · serialize</text><text class="d" x="235" y="98" text-anchor="middle">Buffer → base64</text><text class="d" x="235" y="112" text-anchor="middle">STRING (on-heap)</text><text class="d" x="235" y="130" text-anchor="middle" style="fill:var(--bad)">heap peak here</text>
+  <rect class="st" x="340" y="70" width="130" height="60" rx="8"/><text class="t" x="405" y="94" text-anchor="middle">3 · persist</text><text class="d" x="405" y="110" text-anchor="middle">write execution</text>
+  <rect class="st" x="500" y="70" width="130" height="60" rx="8"/><text class="t" x="565" y="94" text-anchor="middle">4 · enqueue</text><text class="d" x="565" y="110" text-anchor="middle">Redis (Bull)</text>
+  <rect class="st" x="660" y="70" width="120" height="60" rx="8"/><text class="t" x="720" y="94" text-anchor="middle">5 · dequeue</text><text class="d" x="720" y="110" text-anchor="middle">worker picks up</text>
+  <rect class="st" x="800" y="55" width="110" height="90" rx="8" style="stroke:var(--bad)"/><text class="t" x="855" y="80" text-anchor="middle">6 · run</text><text class="d" x="855" y="98" text-anchor="middle">runner heap</text><text class="d" x="855" y="112" text-anchor="middle">Code nodes</text><text class="d" x="855" y="130" text-anchor="middle" style="fill:var(--bad)">OOM path B</text>
+  <line class="f" x1="130" y1="100" x2="158" y2="100"/><line class="f" x1="310" y1="100" x2="338" y2="100"/><line class="f" x1="470" y1="100" x2="498" y2="100"/><line class="f" x1="630" y1="100" x2="658" y2="100"/><line class="f" x1="780" y1="100" x2="798" y2="100"/>
+</svg>
+<figcaption>Figure 2 — Steps 2 (main, serialize upload) and 6 (worker/runner, materialize data) are the heap-pressure points. In queue mode both nodes pay: main encodes, the worker/runner decodes and processes.</figcaption>
+</figure>
+
+<!-- ══════════════ 5 ══════════════ -->
+<h2 id="s5" class="anchor">5 · OOM reproductions (measured)</h2>
+
+<h3>5a · Web node — concurrent large JSON → kernel cgroup kill</h3>
+<p>Eight concurrent 82 MB JSON bodies against <code>/webhook/upload</code>. Container RSS (raw bodies live off-heap; parsed objects on-heap) slams into the 1024 MB container limit and the kernel OOM-killer fires.</p>
+<figure class="fig">
+<svg viewBox="0 0 760 320" role="img" aria-label="Web node RSS crash curve">
+  <style>.ax{stroke:var(--line)}.gl{stroke:var(--line);stroke-dasharray:3 4}.tx{fill:var(--muted);font:11px sans-serif}</style>
+  <line class="ax" x1="60" y1="20" x2="60" y2="280"/><line class="ax" x1="60" y1="280" x2="745" y2="280"/>
+  <line class="gl" x1="60" y1="215" x2="745" y2="215"/><text class="tx" x="55" y="219" text-anchor="end">256</text>
+  <line class="gl" x1="60" y1="150" x2="745" y2="150"/><text class="tx" x="55" y="154" text-anchor="end">512</text>
+  <line class="gl" x1="60" y1="85" x2="745" y2="85"/><text class="tx" x="55" y="89" text-anchor="end">768</text>
+  <line x1="60" y1="150" x2="745" y2="150" stroke="var(--warn)" stroke-width="1.4" stroke-dasharray="6 4"/><text x="740" y="144" text-anchor="end" fill="var(--warn)" font-size="11">512 MB V8 heap cap</text>
+  <line x1="60" y1="20" x2="745" y2="20" stroke="var(--bad)" stroke-width="1.3" stroke-dasharray="2 4"/><text x="740" y="15" text-anchor="end" fill="var(--bad)" font-size="11">1024 MB container limit</text>
+  <text class="tx" x="55" y="284" text-anchor="end">0</text><text class="tx" x="20" y="150" text-anchor="middle" transform="rotate(-90 20 150)">web-node container RSS (MB)</text>
+  <!-- scale x: 60 + t*13.7 (t 0..50); y=280 - mb*0.254 -->
+  <polyline fill="none" stroke="var(--accent)" stroke-width="2.6" points="60,204 87,21 114,20 141,35 168,31 195,251 222,235 250,235 277,242 304,131 331,131 358,131 385,149 412,149 440,204 550,204 690,204"/>
+  <circle cx="114" cy="20" r="4.5" fill="var(--bad)"/><text x="120" y="34" fill="var(--bad)" font-size="11">peak 1024 MB → kernel OOM-kill 💥</text>
+  <line x1="195" y1="30" x2="195" y2="251" stroke="var(--bad)" stroke-dasharray="3 3"/><text x="200" y="268" fill="var(--muted)" font-size="10">process killed, restart, second wave</text>
+  <text class="tx" x="60" y="298" text-anchor="middle">0s</text><text class="tx" x="304" y="298" text-anchor="middle">18s</text><text class="tx" x="690" y="298" text-anchor="middle">45s</text>
+</svg>
+<figcaption>Figure 3 — Measured. RSS 300 → <strong>1024 MB in ~4 s</strong> → kernel cgroup OOM-kill → collapse to 115 MB. Kernel log: <code>Memory cgroup out of memory: Killed process (MainThread) … anon-rss:1005732kB</code>. RestartCount incremented; <strong>zero executions saved.</strong></figcaption>
+</figure>
+
+<h3>5b · Worker / JS Task Runner — 5 M-item array → V8 abort</h3>
+<p><code>POST /webhook/generate?x=5000000</code>. A Code node builds a 5-million-object array on the runner heap.</p>
+<figure class="fig">
+<svg viewBox="0 0 760 300" role="img" aria-label="Worker runner OOM curve">
+  <style>.ax{stroke:var(--line)}.gl{stroke:var(--line);stroke-dasharray:3 4}.tx{fill:var(--muted);font:11px sans-serif}</style>
+  <line class="ax" x1="60" y1="20" x2="60" y2="260"/><line class="ax" x1="60" y1="260" x2="745" y2="260"/>
+  <line class="gl" x1="60" y1="200" x2="745" y2="200"/><text class="tx" x="55" y="204" text-anchor="end">256</text>
+  <line x1="60" y1="140" x2="745" y2="140" stroke="var(--warn)" stroke-width="1.4" stroke-dasharray="6 4"/><text x="740" y="134" text-anchor="end" fill="var(--warn)" font-size="11">512 MB runner heap cap</text>
+  <line class="gl" x1="60" y1="80" x2="745" y2="80"/><text class="tx" x="55" y="84" text-anchor="end">768</text>
+  <text class="tx" x="55" y="264" text-anchor="end">0</text><text class="tx" x="20" y="140" text-anchor="middle" transform="rotate(-90 20 140)">worker container mem (MB)</text>
+  <!-- pts t:mb 0:261 11:261 13:357 15:743 17:804 19:244 21:285 29:256 ; x=60+t*21.4 y=260-mb*0.234 -->
+  <polyline fill="none" stroke="var(--accent)" stroke-width="2.6" points="60,199 295,199 338,177 381,86 424,72 467,203 514,193 685,200"/>
+  <circle cx="424" cy="72" r="4.5" fill="var(--bad)"/><text x="430" y="64" fill="var(--bad)" font-size="11">peak 804 MB · runner heap 559 MB 💥</text>
+  <line x1="467" y1="80" x2="467" y2="203" stroke="var(--bad)" stroke-dasharray="3 3"/><text x="472" y="224" fill="var(--muted)" font-size="10">runner killed; worker survives</text>
+  <text class="tx" x="60" y="278" text-anchor="middle">0s</text><text class="tx" x="424" y="278" text-anchor="middle">17s</text><text class="tx" x="685" y="278" text-anchor="middle">29s</text>
+</svg>
+<figcaption>Figure 4 — Measured. Runner heap crosses 512 → <code>FATAL ERROR: Reached heap limit … JavaScript heap out of memory</code>. The <strong>worker container survives</strong> (RestartCount 0) — only the runner subprocess died, and the execution was recorded as <code>status=error</code> (executions 2 &amp; 3).</figcaption>
+</figure>
+
+<h3>5c · Upload boundary — the four test PDFs</h3>
+<table>
+  <thead><tr><th>File</th><th class="num">Size</th><th class="num">Base64 on heap</th><th class="num">Main heap peak</th><th>Outcome</th></tr></thead>
+  <tbody>
+    <tr><td><code>small.pdf</code></td><td class="num">1 KB</td><td class="num">~0.8 KB</td><td class="num">flat</td><td><span class="pill g">saved</span></td></tr>
+    <tr><td><code>medium.pdf</code></td><td class="num">25 MB</td><td class="num">~34 MB</td><td class="num">~215 MB</td><td><span class="pill g">saved</span></td></tr>
+    <tr><td><code>max.pdf</code></td><td class="num">120 MB</td><td class="num">~160 MB</td><td class="num">~460 MB</td><td><span class="pill g">saved</span> (approaches cap)</td></tr>
+    <tr><td><code>oom.pdf</code></td><td class="num">210 MB</td><td class="num">~280 MB</td><td class="num">&gt; cap</td><td><span class="pill b">OOM · 500 · nothing saved</span></td></tr>
+  </tbody>
+</table>
+<p>A single 90 MB PDF pushed main heap to <strong>383 MB</strong> and survived; scaling the file linearly (~2.6 MB heap per MB uploaded) crosses 512 above ~140 MB. This is the upload OOM boundary.</p>
+
+<!-- ══════════════ 6 ══════════════ -->
+<h2 id="s6" class="anchor">6 · Memory mechanics — where the bytes live</h2>
+<figure class="fig">
+<svg viewBox="0 0 820 210" role="img" aria-label="Memory regions">
+  <style>.t{fill:var(--ink);font:600 13px sans-serif}.s{fill:var(--muted);font:11px sans-serif}</style>
+  <rect x="20" y="24" width="500" height="160" rx="10" fill="none" stroke="var(--bad)" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <text class="s" x="30" y="18" fill="var(--bad)">container limit 1024 MB (kernel cgroup)</text>
+  <rect x="40" y="50" width="300" height="120" rx="9" fill="none" stroke="var(--warn)" stroke-width="1.4"/>
+  <text class="s" x="50" y="44" fill="var(--warn)">V8 heap 512 MB (--max-old-space-size)</text>
+  <rect x="58" y="66" width="264" height="40" rx="6" fill="color-mix(in srgb,var(--accent) 20%,transparent)" stroke="var(--accent)"/><text class="t" x="190" y="90" text-anchor="middle">base64 STRING of the file / big arrays</text>
+  <rect x="58" y="116" width="264" height="34" rx="6" fill="var(--panel2)" stroke="var(--line)"/><text class="s" x="190" y="137" text-anchor="middle">execution JSON, app objects</text>
+  <rect x="360" y="66" width="140" height="84" rx="8" fill="var(--panel2)" stroke="var(--line)"/><text class="t" x="430" y="100" text-anchor="middle">raw Buffer</text><text class="s" x="430" y="118" text-anchor="middle">(off-heap / native)</text>
+  <text class="s" x="540" y="70">• <tspan fill="var(--warn)">--max-old-space-size</tspan> caps only the V8 heap.</text>
+  <text class="s" x="540" y="92">• The base64 <tspan fill="var(--accent)">string</tspan> lives there → it hits 512 first.</text>
+  <text class="s" x="540" y="114">• Raw upload Buffers are off-heap → count toward</text>
+  <text class="s" x="540" y="130">  the 1024 container limit, not the heap cap.</text>
+  <text class="s" x="540" y="158">• Enough concurrent Buffers → the <tspan fill="var(--bad)">container</tspan></text>
+  <text class="s" x="540" y="174">  limit is hit before the heap cap (kernel kill).</text>
+</svg>
+<figcaption>Figure 5 — Two regions, two ceilings. A single big upload tends to hit the 512 heap cap (base64 string); many concurrent uploads hit the 1024 container limit (off-heap buffers).</figcaption>
+</figure>
+
+<h3>Heap composition — idle vs during a 120 MB PDF upload (measured)</h3>
+<div class="grid2">
+  <div class="fig" style="margin:0">
+    <div class="sub" style="text-align:center;margin-bottom:8px">IDLE — heap ≈ 150 MB</div>
+    <svg viewBox="0 0 360 150" role="img" aria-label="idle composition">
+      <style>.bl{fill:var(--muted);font:10px sans-serif}</style>
+      <rect x="8" y="20" width="120" height="18" fill="var(--accent)"/><text class="bl" x="134" y="33">string 64 MB (39%)</text>
+      <rect x="8" y="44" width="43" height="18" fill="var(--purple)"/><text class="bl" x="57" y="57">code 23</text>
+      <rect x="8" y="68" width="32" height="18" fill="var(--good)"/><text class="bl" x="46" y="81">native 17 (off-heap)</text>
+      <rect x="8" y="92" width="30" height="18" fill="var(--warn)"/><text class="bl" x="44" y="105">array 16</text>
+      <rect x="8" y="116" width="28" height="18" fill="#e06c9f"/><text class="bl" x="42" y="129">closure 15 · object 11</text>
+    </svg>
+  </div>
+  <div class="fig" style="margin:0">
+    <div class="sub" style="text-align:center;margin-bottom:8px">DURING UPLOAD — heap 80% strings</div>
+    <svg viewBox="0 0 360 150" role="img" aria-label="upload composition">
+      <style>.bl{fill:var(--muted);font:10px sans-serif}</style>
+      <rect x="8" y="20" width="290" height="26" fill="var(--accent)"/><text class="bl" x="12" y="37" fill="#fff" style="font-weight:700">string 384 MB (80%) — incl. 160 MB PDF base64</text>
+      <rect x="8" y="52" width="18" height="16" fill="var(--purple)"/><text class="bl" x="32" y="64">code 23</text>
+      <rect x="8" y="74" width="14" height="16" fill="var(--good)"/><text class="bl" x="28" y="86">native 17</text>
+      <rect x="8" y="96" width="13" height="16" fill="var(--warn)"/><text class="bl" x="27" y="108">array 16</text>
+      <text class="bl" x="8" y="132" fill="var(--bad)">the single biggest object IS your PDF ↑</text>
+    </svg>
+  </div>
+</div>
+<p>The <code>string</code> region jumps <strong>64 → 384 MB</strong>; the whole increase is the uploaded PDF as one base64 string. Filtered from the heap, that string reads <code>JVBERi0xLjQK…</code> — base64 of <code>%PDF-1.4</code>. That is the OOM, at the object level.</p>
+
+<!-- ══════════════ 7 ══════════════ -->
+<h2 id="s7" class="anchor">7 · Crash-signature reference</h2>
+<table>
+  <thead><tr><th>You observe</th><th>Meaning</th><th>Data saved?</th></tr></thead>
+  <tbody>
+    <tr><td><code>FATAL ERROR: Reached heap limit … JavaScript heap out of memory</code>, exit 134, <code>OOMKilled=false</code></td><td>V8 hit <code>--max-old-space-size</code> first (single large payload)</td><td>No (process aborts)</td></tr>
+    <tr><td>dmesg <code>Memory cgroup out of memory: Killed process</code>, container restart</td><td>Kernel cgroup limit hit first (concurrent off-heap buffers)</td><td>No (process killed)</td></tr>
+    <tr><td>execution <code>status=error</code>, message <code>Node ran out of memory</code></td><td>A child JS Task Runner OOM'd; the worker survived and caught it</td><td><strong>Yes</strong> (error recorded)</td></tr>
+    <tr><td>execution <code>status=error</code>, message <code>OutOfMemoryError: Java heap space</code></td><td>A <strong>downstream JVM service</strong> OOM'd; n8n stayed healthy</td><td><strong>Yes</strong> (error recorded)</td></tr>
+  </tbody>
+</table>
+<div class="callout warn"><span class="h">Docker quirk</span> <code>OOMKilled</code> can read <code>false</code> even when the kernel cgroup OOM-killer fired, because Docker only reflects a kill of container PID 1 (tini), not of the node child. <strong>dmesg is authoritative.</strong></div>
+
+<!-- ══════════════ 8 ══════════════ -->
+<h2 id="s8" class="anchor">8 · RCA — why executions sometimes store and sometimes don't</h2>
+<p class="lead">The execution row is written <em>by</em> the n8n main/worker process. The single deciding factor is: <strong>did that process survive the OOM?</strong></p>
+<figure class="fig">
+<svg viewBox="0 0 820 250" role="img" aria-label="store vs not-store decision">
+  <defs><marker id="ah3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#9aa7b4"/></marker></defs>
+  <style>.b{fill:var(--panel2);stroke:var(--line);stroke-width:1.4}.t{fill:var(--ink);font:600 13px sans-serif}.s{fill:var(--muted);font:11px sans-serif}.f{stroke:#9aa7b4;stroke-width:1.5;fill:none;marker-end:url(#ah3)}</style>
+  <rect class="b" x="20" y="100" width="150" height="52" rx="9"/><text class="t" x="95" y="122" text-anchor="middle">OOM occurs</text><text class="s" x="95" y="139" text-anchor="middle">during a run</text>
+  <path d="M180,110 L250,50" class="f"/><path d="M180,142 L250,200" class="f"/>
+  <rect class="b" x="255" y="24" width="230" height="60" rx="9" style="stroke:var(--good)"/><text class="t" x="370" y="46" text-anchor="middle">OOM in a CHILD / downstream</text><text class="s" x="370" y="63" text-anchor="middle">JS Task Runner, or a Java API you call</text><text class="s" x="370" y="77" text-anchor="middle" style="fill:var(--good)">n8n process survives</text>
+  <rect class="b" x="255" y="176" width="230" height="60" rx="9" style="stroke:var(--bad)"/><text class="t" x="370" y="198" text-anchor="middle">OOM of the n8n PROCESS itself</text><text class="s" x="370" y="215" text-anchor="middle">V8 abort, or cgroup kill of main/worker</text><text class="s" x="370" y="229" text-anchor="middle" style="fill:var(--bad)">process dies</text>
+  <path d="M485,54 L560,54" class="f"/><path d="M485,206 L560,206" class="f"/>
+  <rect class="b" x="565" y="26" width="235" height="56" rx="9" style="stroke:var(--good)"/><text class="t" x="682" y="49" text-anchor="middle" style="fill:var(--good)">✔ STORED as status=error</text><text class="s" x="682" y="66" text-anchor="middle">message captured in execution_data</text>
+  <rect class="b" x="565" y="178" width="235" height="56" rx="9" style="stroke:var(--bad)"/><text class="t" x="682" y="201" text-anchor="middle" style="fill:var(--bad)">✘ NOT STORED</text><text class="s" x="682" y="218" text-anchor="middle">no process left to write the row</text>
+</svg>
+<figcaption>Figure 6 — Caught error → stored; dead process → lost. This fully explains the intermittent behaviour.</figcaption>
+</figure>
+
+<div class="callout bad"><span class="h">"OutOfMemoryError: Java heap space" is not n8n</span>
+Node reports <code>JavaScript heap out of memory</code> / <code>Node ran out of memory</code>. A <em>JVM</em> message means a <strong>downstream Java service</strong> your workflow calls (an HTTP Request node → a Java API/microservice, a Java data node) ran out of heap and returned the text. n8n caught it and stored the run as <code>error</code> — which is precisely why <em>those</em> always store, while the runs that vanish are a <em>different</em> OOM: n8n's own process dying. <strong>You likely have two separate OOMs.</strong></div>
+
+<!-- ══════════════ 9 ══════════════ -->
+<h2 id="s9" class="anchor">9 · Prevention &amp; remediation</h2>
+<div class="callout"><span class="h">Governing formula</span>
+<code>peak heap ≈ concurrency × max_payload_MB × ~2.3</code> &nbsp;(uploads) — and separately <code>runner heap ≈ items × bytes_per_item</code> (Code nodes). <strong>Bound both factors, or the ceiling always loses.</strong></div>
+
+<table>
+  <thead><tr><th>Control</th><th>Concrete setting</th><th>Prevents</th></tr></thead>
+  <tbody>
+    <tr><td>Bound size (edge)</td><td>nginx <code>client_max_body_size 25m;</code></td><td>one oversized upload reaching the heap</td></tr>
+    <tr><td>Bound size (app)</td><td><code>N8N_PAYLOAD_SIZE_MAX=16</code>, <code>N8N_FORMDATA_FILE_SIZE_MAX=16</code></td><td>oversized bodies / form files</td></tr>
+    <tr><td><strong>Bound concurrency</strong></td><td>nginx <code>limit_req_zone</code> + <code>limit_conn</code>; Cloud Run <code>--concurrency=2</code>; worker <code>N8N_CONCURRENCY</code></td><td>many-at-once OOM (the missing half)</td></tr>
+    <tr><td><strong>Binary off-heap</strong></td><td><code>N8N_DEFAULT_BINARY_DATA_MODE=filesystem</code> or <code>s3</code>; or upload to object storage &amp; pass a URL</td><td>the upload OOM <em>entirely</em> (best for large files)</td></tr>
+    <tr><td>Right-size heap</td><td><code>--max-old-space-size</code> ≥ <code>concurrency × max_MB × 2.3</code>; container mem &gt; that</td><td>leaving the ceiling below real demand</td></tr>
+    <tr><td>Bound in-workflow data</td><td>batch/stream Code nodes (SplitInBatches); aggregate, don't return N items; paginate DB/HTTP</td><td>runner-heap array OOM</td></tr>
+    <tr><td>Fix the Java service</td><td>its own <code>-Xmx</code>, pagination/streaming, smaller batches</td><td>the <code>Java heap space</code> errors (size limits won't)</td></tr>
+    <tr><td>Fast recovery</td><td><code>restart: unless-stopped</code> + health checks (present)</td><td>downtime when an OOM still slips through</td></tr>
+  </tbody>
+</table>
+
+<h3>Coverage matrix — do the two proposed ideas suffice?</h3>
+<table>
+  <thead><tr><th>Failure mode</th><th class="num">① Scale up</th><th class="num">② Size limits (n8n+nginx)</th><th class="num">Also need</th></tr></thead>
+  <tbody>
+    <tr><td>Single large upload OOM (main)</td><td class="num">partial</td><td class="num">✔</td><td>off-heap binary</td></tr>
+    <tr><td>Concurrent uploads OOM (main)</td><td class="num">partial</td><td class="num">✘</td><td><strong>concurrency limit</strong></td></tr>
+    <tr><td>Large JSON body OOM (main)</td><td class="num">partial</td><td class="num">✔ (payload max)</td><td>concurrency limit</td></tr>
+    <tr><td>Code-node array OOM (runner)</td><td class="num">partial</td><td class="num">✘</td><td>batch/stream in workflow</td></tr>
+    <tr><td>Downstream Java heap space</td><td class="num">✘ (n8n)</td><td class="num">✘</td><td>fix the Java service</td></tr>
+    <tr><td>Lost executions on hard OOM</td><td class="num">✘</td><td class="num">✘</td><td>prevent the crash + fast restart</td></tr>
+  </tbody>
+</table>
+<div class="callout warn"><span class="h">Verdict</span> The two ideas are the right <em>start</em> but <strong>not sufficient alone</strong>. Size limits + <strong>concurrency limits</strong> together are the core availability fix; <em>scale-up</em> is the number you derive from the formula, not a substitute for it; and the <strong>Java</strong> errors are a separate fix on the Java side.</div>
+
+<!-- ══════════════ 10 ══════════════ -->
+<h2 id="s10" class="anchor">10 · Observability tooling built</h2>
+<ul>
+  <li><strong>heap-monitor</strong> (<code>:8888</code>) — live per-node V8 heap + container RSS + per-V8-space composition; on-demand <strong>raw-heap capture</strong> (snapshot → parsed types &amp; biggest strings) with a <strong>PDF-only filter</strong> and a <strong>timed (delayed) capture</strong> to catch transient payloads.</li>
+  <li><strong>Heap snapshots</strong> — <code>--heapsnapshot-signal=SIGUSR2</code> + <code>--heapsnapshot-near-heap-limit=3</code>; <code>scripts/heap-snapshot.sh</code> captures &amp; copies out for Chrome DevTools.</li>
+  <li><strong><code>scripts/heap-top.py</code></strong> — CLI snapshot parser (types, constructors, raw strings; <code>--pdf</code> filter).</li>
+  <li><strong>Test assets</strong> — <code>workflows/upload-test.json</code> (echoes file metadata); real PDFs <code>small/medium/max/oom.pdf</code> via <code>scripts/make-pdf.py</code>.</li>
+</ul>
+
+<!-- ══════════════ 11 ══════════════ -->
+<h2 id="s11" class="anchor">11 · Recommendations &amp; action plan</h2>
+<ol>
+  <li><strong>Now (config, no infra change):</strong> nginx <code>client_max_body_size 25m</code> + <code>limit_req</code>/<code>limit_conn</code>; <code>N8N_PAYLOAD_SIZE_MAX</code> / <code>N8N_FORMDATA_FILE_SIZE_MAX</code> to your real max; cap worker concurrency. Size the heap from the formula.</li>
+  <li><strong>Next (removes the class of bug):</strong> move binary off-heap — <code>filesystem</code>/<code>s3</code> mode, or an object-storage upload pattern where n8n only receives a reference.</li>
+  <li><strong>Workflow hygiene:</strong> batch/stream Code nodes; never return millions of items; paginate DB/HTTP reads.</li>
+  <li><strong>Separately:</strong> fix the downstream <strong>Java service</strong> heap (its <code>-Xmx</code> / pagination) — n8n limits won't touch it.</li>
+  <li><strong>Resilience:</strong> keep <code>restart</code> + health checks; alert on container RSS and on executions with <code>status=error</code> / "ran out of memory" (the runner OOM is invisible to <code>/metrics</code>).</li>
+</ol>
+
+<!-- ══════════════ 12 ══════════════ -->
+<h2 id="s12" class="anchor">12 · Appendix</h2>
+<h3>Reproduction commands</h3>
+<pre><span class="m"># web-node OOM (concurrent large JSON)</span>
+for c in $(seq 1 8); do curl -s -o /dev/null -H "Content-Type: application/json" \
+  --data-binary @.oom-payload.json http://localhost:8080/webhook/upload &amp; done; wait
+
+<span class="m"># worker / runner OOM (large array)</span>
+curl -X POST <span class="a">"http://localhost:8080/webhook/generate?x=5000000"</span>
+
+<span class="m"># upload boundary</span>
+curl -F "file=@max.pdf" http://localhost:8080/webhook/upload    <span class="g"># survives</span>
+curl -F "file=@oom.pdf" http://localhost:8080/webhook/upload    <span class="r"># OOM, nothing saved</span>
+
+<span class="m"># confirm store-vs-not-store</span>
+docker compose exec postgres psql -U n8n -d n8n -c \
+ "SELECT id,status,\"jsonSizeBytes\" FROM execution_entity ORDER BY id DESC LIMIT 10;"</pre>
+<h3>Key env vars</h3>
+<pre><span class="a">NODE_OPTIONS</span>=--max-old-space-size=512 --heapsnapshot-signal=SIGUSR2 --heapsnapshot-near-heap-limit=3
+<span class="a">N8N_DEFAULT_BINARY_DATA_MODE</span>=default        <span class="m"># → filesystem/s3 to fix uploads</span>
+<span class="a">N8N_PAYLOAD_SIZE_MAX</span>=256                     <span class="m"># → lower to your real max</span>
+<span class="a">EXECUTIONS_MODE</span>=queue</pre>
+
+<div class="foot">
+  Generated from a live investigation of the stack in <code>/mnt/data/company/n8n-poc-issues</code> · n8n 2.28.6 · 2026-07-13.<br>
+  All figures are measured (heap/RSS samples, dmesg, <code>execution_entity</code> rows, heap snapshots), not estimated. Remediation is documented; the running lab was left unchanged.
+</div>
+
+</div>
+</body>
+</html>

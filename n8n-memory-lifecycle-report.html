@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>n8n Memory Lifecycle &amp; GC — Technical Report</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2230;--ink:#e6edf3;--muted:#9aa7b4;--line:#2d333b;
+        --accent:#4f9dff;--good:#3fb950;--bad:#f85149;--warn:#d29922;--purple:#a371f7;--code:#0b0f14;}
+  @media (prefers-color-scheme: light){
+    :root{--bg:#f6f8fa;--panel:#fff;--panel2:#eef1f5;--ink:#1f2328;--muted:#5a6570;--line:#d0d7de;
+          --accent:#0969da;--good:#1a7f37;--bad:#cf222e;--warn:#9a6700;--purple:#8250df;--code:#eef1f5;}}
+  *{box-sizing:border-box} html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 20px 100px}
+  header.hero{padding:38px 32px 28px;margin:24px 0 10px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(160deg,var(--panel),var(--panel2))}
+  h1{font-size:29px;margin:0 0 8px;letter-spacing:-.4px}
+  h2{font-size:22px;margin:44px 0 14px;padding-top:14px;border-top:2px solid var(--line);scroll-margin-top:20px}
+  h3{font-size:17px;margin:24px 0 8px}
+  .sub{color:var(--muted);font-size:15px}
+  .tags{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap}
+  .tag{font-size:12px;padding:3px 11px;border-radius:20px;border:1px solid var(--line);background:var(--panel);color:var(--muted)}
+  nav.toc{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:16px 22px;margin:18px 0 8px;columns:2;column-gap:32px}
+  @media(max-width:640px){nav.toc{columns:1}}
+  nav.toc a{color:var(--accent);text-decoration:none;font-size:13.5px;display:block;padding:3px 0;break-inside:avoid}
+  nav.toc a:hover{text-decoration:underline} nav.toc .n{color:var(--muted);display:inline-block;width:22px}
+  p{margin:11px 0} .lead{font-size:16px}
+  .fig{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:18px;margin:20px 0}
+  .fig figcaption{color:var(--muted);font-size:13px;margin-top:10px;text-align:center}
+  svg{max-width:100%;height:auto;display:block;margin:0 auto}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);font-weight:600}
+  td.num,th.num{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+  code{background:var(--code);padding:1px 6px;border-radius:5px;font-size:13px;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;font-size:12.5px;line-height:1.55;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  pre .g{color:var(--good)} pre .m{color:var(--muted)} pre .a{color:var(--accent)} pre .r{color:var(--bad)}
+  .callout{border-left:4px solid var(--accent);background:var(--panel);border-radius:0 10px 10px 0;padding:12px 16px;margin:16px 0}
+  .callout.bad{border-color:var(--bad)} .callout.good{border-color:var(--good)} .callout.warn{border-color:var(--warn)}
+  .callout .h{font-weight:700;margin-bottom:3px}
+  ul,ol{margin:10px 0 10px 2px;padding-left:22px} li{margin:5px 0}
+  .kpi{display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+  .kpi .c{flex:1 1 150px;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:14px 16px}
+  .kpi .k{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+  .kpi .v{font-size:21px;font-weight:700;margin-top:3px}
+  .foot{color:var(--muted);font-size:12.5px;margin-top:44px;border-top:1px solid var(--line);padding-top:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>n8n Memory Lifecycle &amp; Garbage Collection</h1>
+  <div class="sub">Why the heap rises, why it <em>stays</em>, when it falls, and how to make it fall — all measured live. n8n 2.28.6.</div>
+  <div class="tags">
+    <span class="tag">V8 heap</span><span class="tag">garbage collection</span><span class="tag">high-water mark</span>
+    <span class="tag">leak vs not-a-leak</span><span class="tag">24/7 operations</span><span class="tag">measured evidence</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#s1"><span class="n">1</span>The one-paragraph answer</a>
+  <a href="#s2"><span class="n">2</span>Three numbers, not one</a>
+  <a href="#s3"><span class="n">3</span>The sawtooth &amp; the high-water mark</a>
+  <a href="#s4"><span class="n">4</span>Why it STAYS (GC is pressure-driven)</a>
+  <a href="#s5"><span class="n">5</span>When &amp; how it goes DOWN</a>
+  <a href="#s6"><span class="n">6</span>High-water mark vs a real leak</a>
+  <a href="#s7"><span class="n">7</span>UI, manual runs &amp; common myths</a>
+  <a href="#s8"><span class="n">8</span>Running 24/7 — recommendations</a>
+  <a href="#s9"><span class="n">9</span>Tools &amp; how to reproduce</a>
+</nav>
+
+<!-- 1 -->
+<h2 id="s1">1 · The one-paragraph answer</h2>
+<p class="lead">When a workflow runs, data piles onto the V8 heap. When it finishes, that memory becomes <em>dead</em> — but <strong>V8 does not free it on a timer or when the run ends.</strong> V8 frees dead memory only when it feels <strong>memory pressure</strong> (a big enough new allocation) or on an occasional idle sweep. So an idle n8n <strong>holds its heap at the high-water mark</strong> — it does not fall back to baseline by itself. It falls when the next big run forces a major GC, when you force one, or on restart. This is normal V8 behaviour, <strong>not a leak.</strong></p>
+
+<div class="kpi">
+  <div class="c"><div class="k">Idle baseline</div><div class="v">~150 MB</div><div class="sub" style="font-size:12px">engine + module source (the floor)</div></div>
+  <div class="c"><div class="k">After 120 MB upload</div><div class="v">461 MB</div><div class="sub" style="font-size:12px">base64 string on the heap</div></div>
+  <div class="c"><div class="k">Idle 40 s later</div><div class="v" style="color:var(--warn)">still ~465 MB</div><div class="sub" style="font-size:12px">dead, but NOT collected</div></div>
+  <div class="c"><div class="k">After forced GC</div><div class="v" style="color:var(--good)">141 MB</div><div class="sub" style="font-size:12px">back to the floor</div></div>
+</div>
+
+<!-- 2 -->
+<h2 id="s2">2 · Three numbers, not one</h2>
+<p>"Heap memory" is really three nested figures. Confusing them is the root of most memory questions.</p>
+<figure class="fig">
+<svg viewBox="0 0 820 240" role="img" aria-label="three memory numbers">
+  <style>.t{fill:var(--ink);font:600 13px sans-serif}.s{fill:var(--muted);font:11.5px sans-serif}</style>
+  <rect x="30" y="30" width="470" height="180" rx="10" fill="none" stroke="var(--bad)" stroke-width="1.6"/>
+  <text class="t" x="46" y="52" fill="var(--bad)">container RSS — what the OS/cgroup sees (limit 1024 MB)</text>
+  <rect x="54" y="66" width="410" height="128" rx="9" fill="none" stroke="var(--warn)" stroke-width="1.6"/>
+  <text class="t" x="70" y="88" fill="var(--warn)">heap_total — committed / reserved by V8 (cap 512 MB)</text>
+  <rect x="78" y="104" width="300" height="74" rx="8" fill="color-mix(in srgb,var(--accent) 20%,transparent)" stroke="var(--accent)" stroke-width="1.6"/>
+  <text class="t" x="94" y="128" fill="var(--accent)">heap_used — LIVE objects right now</text>
+  <text class="s" x="94" y="150">this is what GC shrinks;</text>
+  <text class="s" x="94" y="167">the others lag behind it</text>
+  <text class="s" x="520" y="96">• <tspan fill="var(--accent)">heap_used</tspan> drops the moment GC runs.</text>
+  <text class="s" x="520" y="120">• <tspan fill="var(--warn)">heap_total</tspan> is space V8 keeps for reuse —</text>
+  <text class="s" x="520" y="136">  it shrinks slowly, often not until restart.</text>
+  <text class="s" x="520" y="160">• <tspan fill="var(--bad)">RSS</tspan> is the real OS memory; it parks at</text>
+  <text class="s" x="520" y="176">  the peak and rarely returns to the OS.</text>
+  <text class="s" x="520" y="200" style="fill:var(--bad)">"Memory stays high" usually = RSS/total,</text>
+  <text class="s" x="520" y="216" style="fill:var(--bad)">even after heap_used has dropped.</text>
+</svg>
+<figcaption>Figure 1 — Measured idle: <code>heap_used 152 / heap_total 163 / RSS 282 MB</code>. After a 120 MB upload: <code>465 / 474 / 709 MB</code>. When you say "memory," decide which of the three you mean.</figcaption>
+</figure>
+
+<!-- 3 -->
+<h2 id="s3">3 · The sawtooth &amp; the high-water mark</h2>
+<p>Over a day, <code>heap_used</code> does <strong>not</strong> return to baseline between runs. It traces a coarse sawtooth that <em>parks near the high-water mark</em> — the biggest thing the process has handled — and only drops when pressure forces a collection.</p>
+<figure class="fig">
+<svg viewBox="0 0 760 300" role="img" aria-label="sawtooth high-water mark">
+  <style>.ax{stroke:var(--line)}.gl{stroke:var(--line);stroke-dasharray:3 4}.tx{fill:var(--muted);font:11px sans-serif}</style>
+  <line class="ax" x1="60" y1="20" x2="60" y2="250"/><line class="ax" x1="60" y1="250" x2="740" y2="250"/>
+  <line class="gl" x1="60" y1="70" x2="740" y2="70"/><text class="tx" x="55" y="74" text-anchor="end">512 cap</text>
+  <line class="gl" x1="60" y1="210" x2="740" y2="210"/><text class="tx" x="55" y="214" text-anchor="end">150 floor</text>
+  <text class="tx" x="20" y="140" text-anchor="middle" transform="rotate(-90 20 140)">heap_used (MB)</text>
+  <!-- rise, plateau (stays!), drop on GC, rise again -->
+  <polyline fill="none" stroke="var(--accent)" stroke-width="2.6"
+    points="60,210 110,210 150,95 340,92 342,205 400,205 440,100 560,98 562,205 610,205 660,120 720,118"/>
+  <!-- plateau annotation -->
+  <rect x="160" y="60" width="170" height="20" rx="4" fill="color-mix(in srgb,var(--warn) 15%,transparent)"/>
+  <text x="245" y="75" text-anchor="middle" fill="var(--warn)" font-size="11">STAYS while idle (dead, uncollected)</text>
+  <text x="345" y="150" fill="var(--good)" font-size="11">↓ major GC</text>
+  <text x="565" y="150" fill="var(--good)" font-size="11">↓ major GC</text>
+  <text x="620" y="112" fill="var(--muted)" font-size="10">high-water mark</text>
+  <line x1="60" y1="92" x2="740" y2="92" stroke="var(--muted)" stroke-dasharray="2 4"/>
+  <text class="tx" x="400" y="272" text-anchor="middle">time (across a day) →</text>
+</svg>
+<figcaption>Figure 2 — The real shape. Each run pushes toward the high-water mark; the heap <strong>plateaus there while idle</strong> and only steps down when a later allocation forces a major GC. RSS stays near the top the whole time.</figcaption>
+</figure>
+
+<!-- 4 -->
+<h2 id="s4">4 · Why it STAYS — GC is pressure-driven, not time-driven</h2>
+<p>V8 runs two kinds of collection: cheap <strong>scavenges</strong> (young objects) constantly, and expensive <strong>mark-compact</strong> (the old space, where a base64 string or a big array lives) only under old-space <em>pressure</em>. A finished run leaves its data dead in old space — but if nothing new is allocated, no mark-compact runs, so the dead data lingers.</p>
+<h3>Evidence — idle does not collect; tiny activity does not either</h3>
+<pre>baseline                         <span class="a">heap_used = 144 MB</span>
+upload max.pdf (120 MB)          <span class="r">heap_used = 461 MB</span>   <span class="m"># base64 on heap</span>
+… idle 40 s, no activity …       <span class="r">heap_used = 465 MB</span>   <span class="m"># STAYS — not collected</span>
+10 tiny uploads (598 B each)     <span class="r">heap_used = 468 MB</span>   <span class="m"># too little pressure → still no major GC</span></pre>
+<div class="callout warn"><span class="h">Key mechanism</span> A finished execution does <strong>not</strong> trigger a major GC. Neither does idle time, nor small allocations. The dead data is collectible — V8 just hasn't been given a reason to collect it yet.</div>
+
+<!-- 5 -->
+<h2 id="s5">5 · When &amp; how it goes DOWN</h2>
+<h3>Automatically — a big-enough next allocation forces the major GC</h3>
+<pre>stuck idle                       <span class="r">heap_used = 470 MB</span>
+upload medium.pdf (25 MB)  →     <span class="g">heap_used = 212 MB</span>   <span class="m"># t+4s: major GC freed the old 160 MB blob</span></pre>
+<p>The drop is triggered by the <em>new</em> allocation's pressure, not by a clock. So in a busy system the next big run cleans up the previous one; in an idle system the dead data can sit for a long time.</p>
+
+<h3>On demand — force a full GC (built into the monitor)</h3>
+<pre>stuck idle                       <span class="r">heap_used = 461 MB</span>
+Force GC (SIGUSR2 snapshot)  →   <span class="g">heap_used = 141 MB</span>   <span class="m"># full mark-compact, back to floor</span></pre>
+<p>A V8 heap snapshot performs a full mark-compact as a side effect. The <strong>⟲ Force GC</strong> button (and <code>/api/gc</code>) triggers it and deletes the snapshot — freeing all dead data on demand.</p>
+
+<table>
+  <thead><tr><th>Method</th><th>What it frees</th><th>Timing</th></tr></thead>
+  <tbody>
+    <tr><td>Do nothing (next big run)</td><td><code>heap_used</code> dead objects</td><td>pressure-driven — not guaranteed soon</td></tr>
+    <tr><td><strong>Force GC</strong> (monitor button / <code>/api/gc</code>)</td><td><code>heap_used</code> → floor</td><td>on demand, seconds</td></tr>
+    <tr><td>Lower <code>--max-old-space-size</code></td><td>GC triggers earlier &amp; more often</td><td>smaller, more frequent sawtooth</td></tr>
+    <tr><td><strong>Restart the process</strong></td><td><code>heap_used</code> <em>and</em> <code>heap_total</code>/RSS → floor</td><td>instant, guaranteed</td></tr>
+  </tbody>
+</table>
+<div class="callout"><span class="h">Note on RSS</span> Force GC drops <code>heap_used</code>, but <code>heap_total</code>/RSS (committed pages) often stay near the peak. Only a <strong>restart</strong> returns RSS to the floor.</div>
+
+<!-- 6 -->
+<h2 id="s6">6 · High-water mark vs a real leak</h2>
+<figure class="fig">
+<svg viewBox="0 0 760 250" role="img" aria-label="leak vs not leak">
+  <style>.ax{stroke:var(--line)}.tx{fill:var(--muted);font:11px sans-serif}.t{fill:var(--ink);font:600 12px sans-serif}</style>
+  <line class="ax" x1="60" y1="20" x2="60" y2="210"/><line class="ax" x1="60" y1="210" x2="740" y2="210"/>
+  <text class="tx" x="20" y="115" text-anchor="middle" transform="rotate(-90 20 115)">heap_used AFTER GC (the floor)</text>
+  <!-- flat floor = healthy -->
+  <polyline fill="none" stroke="var(--good)" stroke-width="2.4" points="60,180 200,178 340,180 480,179 620,180 720,179"/>
+  <text class="t" x="250" y="168" fill="var(--good)">flat floor after GC = NORMAL (high-water mark is fine)</text>
+  <!-- rising floor = leak -->
+  <polyline fill="none" stroke="var(--bad)" stroke-width="2.4" points="60,175 200,150 340,120 480,90 620,60 720,40"/>
+  <text class="t" x="470" y="70" fill="var(--bad)">rising floor = REAL LEAK → investigate</text>
+  <text class="tx" x="400" y="232" text-anchor="middle">time (days) →</text>
+</svg>
+<figcaption>Figure 3 — Watch the <strong>post-GC floor</strong>, not the peak. A high peak with a flat floor is normal committed memory. A floor that climbs day over day is a genuine leak.</figcaption>
+</figure>
+<ul>
+  <li><strong>Not a leak:</strong> RSS parks near the peak all day, but <code>heap_used</code> returns to ~150 MB whenever a GC runs. Reusable committed memory.</li>
+  <li><strong>Leak:</strong> the value <em>right after a forced GC</em> keeps rising across restarts of activity — something is holding references it shouldn't.</li>
+</ul>
+
+<!-- 7 -->
+<h2 id="s7">7 · UI, manual runs &amp; common myths</h2>
+<table>
+  <thead><tr><th>Belief</th><th>Reality</th></tr></thead>
+  <tbody>
+    <tr><td>"Closing the web UI frees the heap"</td><td><strong>No.</strong> The UI is your browser; the heap is the server. Closing a tab frees browser memory, not server memory.</td></tr>
+    <tr><td>"Navigating to another page frees it"</td><td><strong>No.</strong> Same reason. (Exception: opening a <em>big execution</em> in the editor makes the server load that data into <em>its</em> heap to send it — leaving the page stops re-fetching, then GC frees it.)</td></tr>
+    <tr><td>"Memory only moves on manual runs"</td><td><strong>No.</strong> Any execution moves it. A manual run executes on <strong>main</strong> (and animates the canvas); a production webhook executes on the <strong>worker</strong> (shows in the Executions tab, no canvas).</td></tr>
+    <tr><td>"It should drop right after the run finishes"</td><td><strong>No.</strong> Finishing a run doesn't trigger a major GC (§4).</td></tr>
+  </tbody>
+</table>
+
+<!-- 8 -->
+<h2 id="s8">8 · Running 24/7 — recommendations</h2>
+<ol>
+  <li><strong>Keep the high-water mark low</strong> (best): move large binary off-heap (<code>filesystem</code>/<code>s3</code>) and cap upload size + concurrency, so the heap never climbs to 465 MB in the first place.</li>
+  <li><strong>Recycle the process</strong> to release RSS: a scheduled restart (example <code>recycler</code> service in <code>docker-compose.yml</code>) or restart-after-N-executions. You already have <code>restart: unless-stopped</code>.</li>
+  <li><strong>Size the heap from the sawtooth peak:</strong> <code>--max-old-space-size ≥ concurrency × max_MB × 2.3</code>, container memory above that.</li>
+  <li><strong>Monitor the floor, not the peak:</strong> alert on <code>heap_used</code> <em>after</em> GC trending up over days (leak), and on container RSS approaching the limit (imminent OOM).</li>
+  <li><strong>Force GC only as a stopgap:</strong> the <code>/api/gc</code> button is great for demos and manual relief, not a substitute for (1)–(3).</li>
+</ol>
+
+<!-- 9 -->
+<h2 id="s9">9 · Tools &amp; how to reproduce</h2>
+<ul>
+  <li><strong>heap-monitor</strong> (<code>:8888</code>) — live <code>heap_used</code> + <code>heap_total</code> + RSS + per-space bar; <strong>⟲ Force GC</strong> and <strong>◍ Capture raw heap</strong> (with timed capture &amp; PDF filter).</li>
+  <li><code>/api/gc?node=main</code> — force a full GC, returns <code>before → after (freed)</code>.</li>
+  <li><code>recycler</code> service (commented in compose) — periodic restart for 24/7.</li>
+</ul>
+<pre><span class="m"># watch it stay, then force it down</span>
+curl -F "file=@max.pdf" http://localhost:8080/webhook/upload        <span class="m"># heap → ~465 MB</span>
+<span class="m"># …wait, watch http://localhost:8888 — it stays…</span>
+curl -s <span class="a">"http://localhost:8888/api/gc?node=main"</span>                    <span class="g"># → freed ~160-320 MB</span>
+
+<span class="m"># instant full reset (heap_used AND RSS)</span>
+docker compose restart n8n-main</pre>
+
+<div class="foot">
+  Generated from a live investigation of the stack in <code>/mnt/data/company/n8n-poc-issues</code> · n8n 2.28.6 · 2026-07-13.<br>
+  All heap figures are measured from <code>/metrics</code> and container stats. Companion: <code>n8n-oom-technical-report.html</code> (the OOM/crash side of the same memory model).
+</div>
+
+</div>
+</body>
+</html>

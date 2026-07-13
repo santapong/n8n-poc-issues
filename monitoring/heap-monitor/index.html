@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>n8n heap monitor · realtime</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--ink:#e6edf3;--muted:#9aa7b4;--line:#2d333b;
+        --good:#3fb950;--bad:#f85149;--warn:#d29922;--accent:#4f9dff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  header{padding:16px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  h1{font-size:18px;margin:0}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);display:inline-block}
+  .dot.on{background:var(--good);box-shadow:0 0 8px var(--good)}
+  .dot.off{background:var(--bad);box-shadow:0 0 8px var(--bad)}
+  .hint{color:var(--muted);font-size:12.5px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:22px;max-width:1100px;margin:0 auto}
+  @media(max-width:760px){.grid{grid-template-columns:1fr}}
+  .card{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:18px}
+  .card h2{margin:0 0 2px;font-size:16px;display:flex;align-items:center;gap:8px}
+  .role{color:var(--muted);font-size:12px;font-weight:400}
+  .nums{display:flex;gap:22px;margin:12px 0 6px;flex-wrap:wrap}
+  .n .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+  .n .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+  .v.warn{color:var(--warn)} .v.bad{color:var(--bad)} .v.good{color:var(--good)}
+  canvas{width:100%;height:150px;display:block;margin-top:8px;border-radius:8px;background:#0b0f14}
+  .legend{display:flex;gap:16px;margin-top:8px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+  .sw{display:inline-block;width:12px;height:3px;vertical-align:middle;margin-right:5px;border-radius:2px}
+  footer{max-width:1100px;margin:0 auto;padding:0 22px 30px;color:var(--muted);font-size:12.5px}
+  code{background:#0b0f14;padding:1px 6px;border-radius:5px;font-family:ui-monospace,Menlo,monospace}
+  .comp{margin-top:14px}
+  .comp .k{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+  .bar{display:flex;width:100%;height:22px;border-radius:6px;overflow:hidden;background:#0b0f14;border:1px solid var(--line)}
+  .bar > span{height:100%}
+  .splegend{display:flex;gap:14px;flex-wrap:wrap;margin-top:7px;font-size:12px;color:var(--muted)}
+  .splegend b{color:var(--ink);font-weight:600}
+  .rawhead{display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap}
+  .rawbtn{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:7px 13px;font-size:13px;font-weight:600;cursor:pointer}
+  .rawbtn:disabled{opacity:.5;cursor:wait}
+  .gcbtn{background:var(--good);color:#fff;border:0;border-radius:8px;padding:7px 13px;font-size:13px;font-weight:600;cursor:pointer}
+  .gcbtn:disabled{opacity:.5;cursor:wait}
+  .delaylbl{font-size:12px;color:var(--muted)}
+  .delayin{width:48px;background:#0b0f14;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:13px;text-align:center}
+  .rawnote{color:var(--muted);font-size:12px}
+  .rawbox{margin-top:10px}
+  .rawbox table{width:100%;border-collapse:collapse;font-size:12px;margin:6px 0}
+  .rawbox td,.rawbox th{border-bottom:1px solid var(--line);padding:3px 8px;text-align:left}
+  .rawbox th{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:10.5px;letter-spacing:.4px}
+  .rawbox td.n{text-align:right;font-variant-numeric:tabular-nums}
+  .rawbox .mb{color:var(--accent);font-weight:600}
+  .strs{margin-top:8px;max-height:210px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#0b0f14}
+  .strs div{font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:3px 8px;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .strs .sz{color:var(--warn);margin-right:8px}
+  .rawcap{color:var(--muted);font-size:11.5px;margin:6px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>n8n heap monitor</h1>
+  <span class="hint"><span id="pollDot" class="dot"></span> polling every 1s · heap cap <b id="capL">512</b> MB · container limit <b id="limL">1024</b> MB</span>
+  <span class="hint" style="margin-left:auto" id="clock">—</span>
+</header>
+
+<div class="grid">
+  <div class="card" id="card-main">
+    <h2><span id="dot-main" class="dot"></span> n8n-main <span class="role">web node · receives uploads</span></h2>
+    <div class="nums">
+      <div class="n"><div class="k">heap used</div><div class="v" id="main-heap">—</div></div>
+      <div class="n"><div class="k">external (buffers)</div><div class="v" id="main-ext">—</div></div>
+      <div class="n"><div class="k">container RSS</div><div class="v" id="main-rss">—</div></div>
+    </div>
+    <canvas id="cv-main"></canvas>
+    <div class="legend">
+      <span><i class="sw" style="background:#4f9dff"></i>heap used</span>
+      <span><i class="sw" style="background:#3fb950"></i>container RSS</span>
+      <span><i class="sw" style="background:#f85149"></i>512 MB heap cap</span>
+    </div>
+    <div class="comp"><div class="k">what's inside the heap (by V8 space)</div><div class="bar" id="sp-main"></div><div class="splegend" id="spl-main"></div></div>
+    <div class="rawhead">
+      <label class="delaylbl">capture in <input type="number" class="delayin" id="delay-main" value="0" min="0" max="120" step="1"> s</label>
+      <button class="rawbtn" data-node="main">◍ Capture raw heap</button>
+      <button class="gcbtn" data-node="main">⟲ Force GC</button>
+      <span class="rawnote" id="raw-main-note"></span>
+    </div>
+    <div class="rawbox" id="raw-main"></div>
+  </div>
+
+  <div class="card" id="card-worker">
+    <h2><span id="dot-worker" class="dot"></span> n8n-worker <span class="role">executes queued jobs · Code nodes</span></h2>
+    <div class="nums">
+      <div class="n"><div class="k">heap used</div><div class="v" id="worker-heap">—</div></div>
+      <div class="n"><div class="k">external</div><div class="v" id="worker-ext">—</div></div>
+      <div class="n"><div class="k">container RSS</div><div class="v" id="worker-rss">—</div></div>
+    </div>
+    <canvas id="cv-worker"></canvas>
+    <div class="legend">
+      <span><i class="sw" style="background:#4f9dff"></i>heap used</span>
+      <span><i class="sw" style="background:#3fb950"></i>container RSS <b>(shows runner OOM)</b></span>
+      <span><i class="sw" style="background:#f85149"></i>512 MB cap</span>
+    </div>
+    <div class="comp"><div class="k">what's inside the heap (by V8 space)</div><div class="bar" id="sp-worker"></div><div class="splegend" id="spl-worker"></div></div>
+    <div class="rawhead">
+      <label class="delaylbl">capture in <input type="number" class="delayin" id="delay-worker" value="0" min="0" max="120" step="1"> s</label>
+      <button class="rawbtn" data-node="worker">◍ Capture raw heap</button>
+      <button class="gcbtn" data-node="worker">⟲ Force GC</button>
+      <span class="rawnote" id="raw-worker-note"></span>
+    </div>
+    <div class="rawbox" id="raw-worker"></div>
+  </div>
+</div>
+
+<footer>
+  <b>How to read it:</b> the <span style="color:#4f9dff">blue</span> line is the V8 heap from <code>/metrics</code>.
+  The <span style="color:#3fb950">green</span> line is the real container memory (via the Docker socket) — this is the one that
+  reveals the <b>JS Task Runner</b> OOM on the worker, which the heap metric can't see.
+  Upload a big file and watch <b>n8n-main</b>: if the blue/green lines stay flat, the web node is <i>not</i> going down.
+  <br><br>
+  <b>Want the actual objects inside the heap</b> (constructors, retained sizes, string/buffer contents) — not just totals?
+  Take a full heap snapshot and open it in Chrome DevTools:
+  <br><code>scripts/heap-snapshot.sh n8n-main</code> → then Chrome ▸ <code>chrome://inspect</code> ▸ <b>Load</b> ▸ pick the file in <code>./heapsnapshots/</code>.
+  The per-space bar above is the live coarse view; the snapshot is the full object-level view.
+</footer>
+
+<script>
+const CAP = 512, LIMIT = 1024;              // MB, updated from server
+const N = 180;                               // ~3 min of history at 1s
+const series = {
+  main:   {heap:[], rss:[]},
+  worker: {heap:[], rss:[]},
+};
+const MB = b => b==null ? null : b/1048576;
+const fmt = b => b==null ? '—' : (b/1048576).toFixed(0)+' MB';
+
+function push(arr,v){ arr.push(v); if(arr.length>N) arr.shift(); }
+
+function draw(id, s, capMB, limMB){
+  const cv = document.getElementById(id);
+  const dpr = window.devicePixelRatio||1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w*dpr; cv.height = h*dpr;
+  const ctx = cv.getContext('2d'); ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,h);
+  const yTop = limMB;                          // full scale = container limit
+  const y = mb => h - (mb/yTop)*(h-6) - 3;
+  // grid + cap line
+  ctx.strokeStyle = '#1c2230'; ctx.lineWidth=1;
+  [0.25,0.5,0.75].forEach(f=>{ ctx.beginPath(); ctx.moveTo(0,h*(1-f)); ctx.lineTo(w,h*(1-f)); ctx.stroke(); });
+  // 512 cap
+  ctx.strokeStyle = '#f85149'; ctx.setLineDash([5,4]); ctx.beginPath();
+  ctx.moveTo(0,y(capMB)); ctx.lineTo(w,y(capMB)); ctx.stroke(); ctx.setLineDash([]);
+  const line = (data,color)=>{
+    ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath(); let started=false;
+    data.forEach((v,i)=>{ if(v==null){started=false;return;}
+      const x=(i/(N-1))*w; if(!started){ctx.moveTo(x,y(v));started=true;} else ctx.lineTo(x,y(v)); });
+    ctx.stroke();
+  };
+  line(s.rss.map(MB), '#3fb950');
+  line(s.heap.map(MB), '#4f9dff');
+}
+
+// V8 spaces worth showing, in display order, with colors + plain-language meaning
+const SPACES = [
+  ['old',          '#4f9dff', 'long-lived objects (most app data)'],
+  ['large_object', '#e3b341', 'big allocations >256KB (buffers, big strings)'],
+  ['new',          '#3fb950', 'short-lived / just-allocated'],
+  ['code',         '#a371f7', 'compiled JS'],
+  ['trusted',      '#79c0ff', 'internal V8'],
+];
+function renderSpaces(node, spaces){
+  const bar = document.getElementById('sp-'+node);
+  const leg = document.getElementById('spl-'+node);
+  if(!spaces){ bar.innerHTML=''; leg.innerHTML=''; return; }
+  const total = Object.values(spaces).reduce((a,b)=>a+b,0) || 1;
+  bar.innerHTML=''; leg.innerHTML='';
+  SPACES.forEach(([key,color,desc])=>{
+    const v = spaces[key]||0; if(v<=0) return;
+    const pct = (v/total*100);
+    const seg = document.createElement('span');
+    seg.style.background=color; seg.style.width=pct.toFixed(2)+'%';
+    seg.title = `${key}: ${(v/1048576).toFixed(1)} MB — ${desc}`;
+    bar.appendChild(seg);
+    const li = document.createElement('span');
+    li.innerHTML = `<i class="sw" style="background:${color}"></i><b>${key}</b> ${(v/1048576).toFixed(0)}MB`;
+    leg.appendChild(li);
+  });
+}
+
+function setNode(node, m, capBytes){
+  const dot = document.getElementById('dot-'+node);
+  dot.className = 'dot ' + (m.up ? 'on':'off');
+  const hEl = document.getElementById(node+'-heap');
+  hEl.textContent = fmt(m.heapUsed);
+  const pct = m.heapUsed && capBytes ? m.heapUsed/capBytes : 0;
+  hEl.className = 'v ' + (pct>0.85?'bad':pct>0.6?'warn':'good');
+  document.getElementById(node+'-ext').textContent = fmt(m.external);
+  document.getElementById(node+'-rss').textContent = fmt(m.rss);
+  renderSpaces(node, m.spaces);
+  push(series[node].heap, m.heapUsed);
+  push(series[node].rss,  m.rss);
+}
+
+async function tick(){
+  const dot = document.getElementById('pollDot');
+  try{
+    const r = await fetch('/api/heap',{cache:'no-store'});
+    const d = await r.json();
+    dot.className='dot on';
+    const capB=d.heapCapBytes, capMB=capB/1048576, limMB=d.memLimitBytes/1048576;
+    document.getElementById('capL').textContent=capMB.toFixed(0);
+    document.getElementById('limL').textContent=limMB.toFixed(0);
+    setNode('main', d.main, capB);
+    setNode('worker', d.worker, capB);
+    draw('cv-main', series.main, capMB, limMB);
+    draw('cv-worker', series.worker, capMB, limMB);
+    document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+  }catch(e){ dot.className='dot off'; }
+}
+setInterval(tick, 1000); tick();
+
+// ── raw heap capture (full snapshot → parsed contents) ──
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const lastRaw = {};
+function stringsHtml(node){
+  const d = lastRaw[node]; if(!d) return '';
+  const pdfOnly = document.getElementById('pdfonly-'+node)?.checked;
+  const list = pdfOnly ? d.pdfStrings : d.bigStrings;
+  if(!list || !list.length){
+    return `<div>${pdfOnly ? 'no PDF upload data resident in the heap right now — upload a PDF, then capture' : '(no strings &gt; 4 KB)'}</div>`;
+  }
+  return list.map(s=>`<div><span class="sz">${s.mb}MB</span>${esc(s.text)}</div>`).join('');
+}
+function renderRaw(node, d){
+  const box = document.getElementById('raw-'+node);
+  if(d.error){ box.innerHTML = `<div class="rawcap" style="color:var(--bad)">⚠ ${esc(d.error)}</div>`; return; }
+  lastRaw[node] = d;
+  const types = d.byType.filter(t=>t.mb>=0.1).map(t=>
+    `<tr><td>${esc(t.type)}</td><td class="n">${t.count.toLocaleString()}</td><td class="n mb">${t.mb} MB</td><td class="n">${t.pct}%</td></tr>`).join('');
+  const ctors = d.byCtor.slice(0,8).map(c=>
+    `<tr><td>${esc(c.label)}</td><td class="n">${c.count.toLocaleString()}</td><td class="n mb">${c.mb} MB</td></tr>`).join('');
+  const pdfBadge = d.pdfCount
+    ? `<span style="color:var(--good);font-weight:600">● ${d.pdfCount} PDF blob(s), ${d.pdfMB} MB resident</span>`
+    : `<span style="color:var(--muted)">no PDF resident</span>`;
+  box.innerHTML = `
+    <div class="rawcap">snapshot ${d.snapshotMB} MB · ${d.nodes.toLocaleString()} objects · ${d.totalMB} MB shallow total · ${pdfBadge}</div>
+    <table><tr><th>heap by type</th><th>count</th><th>size</th><th>share</th></tr>${types}</table>
+    <table><tr><th>top object constructors / arrays</th><th>count</th><th>size</th></tr>${ctors}</table>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+      <span class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px">biggest resident strings</span>
+      <label style="font-size:12px;color:var(--ink);margin-left:auto"><input type="checkbox" id="pdfonly-${node}"> PDF upload only</label>
+    </div>
+    <div class="strs" id="strs-${node}">${stringsHtml(node)}</div>`;
+  document.getElementById('pdfonly-'+node).addEventListener('change', ()=>{
+    document.getElementById('strs-'+node).innerHTML = stringsHtml(node);
+  });
+}
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+document.querySelectorAll('.gcbtn').forEach(btn=>{
+  btn.addEventListener('click', async ()=>{
+    const node = btn.dataset.node;
+    const note = document.getElementById('raw-'+node+'-note');
+    btn.disabled = true; note.textContent = '⟲ forcing full GC…';
+    try{
+      const r = await fetch('/api/gc?node='+node, {cache:'no-store'});
+      const d = await r.json();
+      note.textContent = d.error ? ('⚠ '+d.error)
+        : `GC done · ${d.beforeMB} MB → ${d.afterMB} MB (freed ${d.freedMB} MB)`;
+    }catch(e){ note.textContent = '⚠ '+e; }
+    finally{ btn.disabled = false; }
+  });
+});
+document.querySelectorAll('.rawbtn').forEach(btn=>{
+  btn.addEventListener('click', async ()=>{
+    const node = btn.dataset.node;
+    const note = document.getElementById('raw-'+node+'-note');
+    const delayEl = document.getElementById('delay-'+node);
+    let delay = Math.max(0, Math.min(120, parseInt(delayEl.value||'0',10)||0));
+    btn.disabled = true; delayEl.disabled = true;
+    try{
+      // countdown so you can start an upload, then let it fire at your chosen moment
+      for(let s=delay; s>0; s--){
+        note.textContent = `⏱ capturing in ${s}s — start your upload now…`;
+        await sleep(1000);
+      }
+      note.textContent = 'capturing snapshot & parsing… (~10–20s; heap is frozen at trigger moment)';
+      const t0 = Date.now();
+      const r = await fetch('/api/heapraw?node='+node, {cache:'no-store'});
+      const d = await r.json();
+      renderRaw(node, d);
+      note.textContent = `captured ${delay>0?`${delay}s after arming`:'now'} · done in ${((Date.now()-t0)/1000).toFixed(1)}s`;
+    }catch(e){
+      document.getElementById('raw-'+node).innerHTML = `<div class="rawcap" style="color:var(--bad)">⚠ ${esc(String(e))}</div>`;
+      note.textContent = '';
+    }finally{ btn.disabled = false; delayEl.disabled = false; }
+  });
+});
+</script>
+</body>
+</html>

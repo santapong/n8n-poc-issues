@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 620" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="arw" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#7d8794"/>
+    </marker>
+    <marker id="arwR" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#cf222e"/>
+    </marker>
+    <linearGradient id="hdr" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1c2230"/><stop offset="1" stop-color="#0d1117"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="980" height="620" fill="#0d1117"/>
+
+  <!-- title -->
+  <text x="40" y="46" fill="#e6edf3" font-size="24" font-weight="700">n8n web node lifecycle — queue mode</text>
+  <text x="40" y="70" fill="#9aa7b4" font-size="14">The web node PREPARES and HANDS OFF. It never runs the workflow — the worker does.</text>
+
+  <!-- ===== WEB NODE lane ===== -->
+  <rect x="30" y="96" width="700" height="250" rx="14" fill="url(#hdr)" stroke="#2d333b" stroke-width="1.5"/>
+  <text x="50" y="124" fill="#4f9dff" font-size="15" font-weight="700">n8n-main · WEB NODE</text>
+  <text x="50" y="142" fill="#9aa7b4" font-size="12">512 MB heap · receives request, prepares data, writes record, enqueues</text>
+
+  <!-- step 1 -->
+  <rect x="50" y="160" width="150" height="150" rx="10" fill="#161b22" stroke="#2d333b"/>
+  <circle cx="72" cy="184" r="12" fill="#4f9dff"/><text x="72" y="189" fill="#0d1117" font-size="13" font-weight="700" text-anchor="middle">1</text>
+  <text x="92" y="189" fill="#e6edf3" font-size="13" font-weight="600">receive</text>
+  <text x="66" y="230" fill="#9aa7b4" font-size="11.5" text-anchor="middle">webhook / API</text>
+  <text x="66" y="248" fill="#9aa7b4" font-size="11.5" text-anchor="middle">request arrives</text>
+  <text x="66" y="266" fill="#9aa7b4" font-size="11.5" text-anchor="middle">(via nginx)</text>
+
+  <!-- step 2 OOM -->
+  <rect x="215" y="160" width="160" height="150" rx="10" fill="#2a1416" stroke="#cf222e" stroke-width="1.8"/>
+  <circle cx="237" cy="184" r="12" fill="#f85149"/><text x="237" y="189" fill="#0d1117" font-size="13" font-weight="700" text-anchor="middle">2</text>
+  <text x="257" y="189" fill="#e6edf3" font-size="13" font-weight="600">prepare (heap)</text>
+  <text x="295" y="222" fill="#e6edf3" font-size="11.5" text-anchor="middle">parse body →</text>
+  <text x="295" y="240" fill="#e6edf3" font-size="11.5" text-anchor="middle">data on the HEAP</text>
+  <text x="295" y="262" fill="#f85149" font-size="11.5" text-anchor="middle" font-weight="700">file → base64 STRING</text>
+  <text x="295" y="292" fill="#f85149" font-size="12" text-anchor="middle" font-weight="700">💥 OOM happens here</text>
+
+  <!-- step 3 -->
+  <rect x="390" y="160" width="150" height="150" rx="10" fill="#161b22" stroke="#2d333b"/>
+  <circle cx="412" cy="184" r="12" fill="#3fb950"/><text x="412" y="189" fill="#0d1117" font-size="13" font-weight="700" text-anchor="middle">3</text>
+  <text x="432" y="189" fill="#e6edf3" font-size="13" font-weight="600">write DB</text>
+  <text x="465" y="226" fill="#9aa7b4" font-size="11.5" text-anchor="middle">create execution</text>
+  <text x="465" y="244" fill="#9aa7b4" font-size="11.5" text-anchor="middle">row (status "new")</text>
+  <text x="465" y="266" fill="#9aa7b4" font-size="11.5" text-anchor="middle">+ initial data</text>
+
+  <!-- step 4 -->
+  <rect x="555" y="160" width="150" height="150" rx="10" fill="#161b22" stroke="#2d333b"/>
+  <circle cx="577" cy="184" r="12" fill="#d29922"/><text x="577" y="189" fill="#0d1117" font-size="13" font-weight="700" text-anchor="middle">4</text>
+  <text x="597" y="189" fill="#e6edf3" font-size="13" font-weight="600">enqueue</text>
+  <text x="630" y="230" fill="#9aa7b4" font-size="11.5" text-anchor="middle">push job to</text>
+  <text x="630" y="248" fill="#9aa7b4" font-size="11.5" text-anchor="middle">Redis (Bull)</text>
+
+  <!-- arrows within web lane -->
+  <line x1="200" y1="235" x2="213" y2="235" stroke="#7d8794" stroke-width="1.6" marker-end="url(#arw)"/>
+  <line x1="375" y1="235" x2="388" y2="235" stroke="#7d8794" stroke-width="1.6" marker-end="url(#arw)"/>
+  <line x1="540" y1="235" x2="553" y2="235" stroke="#7d8794" stroke-width="1.6" marker-end="url(#arw)"/>
+
+  <!-- responds note -->
+  <text x="50" y="335" fill="#9aa7b4" font-size="11.5">5 · responds to client immediately (onReceived) — then the web node's job is DONE ✓</text>
+
+  <!-- ===== STORES ===== -->
+  <!-- Postgres -->
+  <rect x="770" y="150" width="180" height="86" rx="12" fill="#161b22" stroke="#3fb950" stroke-width="1.5"/>
+  <text x="860" y="180" fill="#3fb950" font-size="14" font-weight="700" text-anchor="middle">Postgres</text>
+  <text x="860" y="202" fill="#9aa7b4" font-size="11.5" text-anchor="middle">execution_entity</text>
+  <text x="860" y="219" fill="#9aa7b4" font-size="11.5" text-anchor="middle">execution_data</text>
+  <path d="M544,200 C700,200 700,190 768,190" fill="none" stroke="#3fb950" stroke-width="1.8" marker-end="url(#arw)"/>
+
+  <!-- Redis -->
+  <rect x="770" y="260" width="180" height="72" rx="12" fill="#161b22" stroke="#d29922" stroke-width="1.5"/>
+  <text x="860" y="290" fill="#d29922" font-size="14" font-weight="700" text-anchor="middle">Redis (Bull)</text>
+  <text x="860" y="312" fill="#9aa7b4" font-size="11.5" text-anchor="middle">job → execution id</text>
+  <path d="M706,270 C740,285 745,292 768,294" fill="none" stroke="#d29922" stroke-width="1.8" marker-end="url(#arw)"/>
+
+  <!-- ===== WORKER lane ===== -->
+  <rect x="30" y="400" width="920" height="150" rx="14" fill="url(#hdr)" stroke="#cf222e" stroke-width="1.5"/>
+  <text x="50" y="428" fill="#f85149" font-size="15" font-weight="700">n8n-worker · RUNS THE WORKFLOW</text>
+  <text x="50" y="446" fill="#9aa7b4" font-size="12">512 MB heap · dequeues the job and executes the nodes (Code nodes in the JS Task Runner)</text>
+
+  <!-- step 6 -->
+  <rect x="50" y="462" width="200" height="72" rx="10" fill="#161b22" stroke="#2d333b"/>
+  <circle cx="72" cy="486" r="12" fill="#4f9dff"/><text x="72" y="491" fill="#0d1117" font-size="13" font-weight="700" text-anchor="middle">6</text>
+  <text x="92" y="491" fill="#e6edf3" font-size="13" font-weight="600">dequeue &amp; run</text>
+  <text x="150" y="514" fill="#9aa7b4" font-size="11.5" text-anchor="middle">execute workflow nodes</text>
+
+  <!-- runner -->
+  <rect x="270" y="462" width="200" height="72" rx="10" fill="#2a1416" stroke="#cf222e" stroke-width="1.6"/>
+  <text x="370" y="488" fill="#f85149" font-size="13" font-weight="700" text-anchor="middle">JS Task Runner</text>
+  <text x="370" y="508" fill="#9aa7b4" font-size="11.5" text-anchor="middle">Code node · own heap</text>
+  <text x="370" y="524" fill="#f85149" font-size="11.5" text-anchor="middle">💥 big-array OOM here</text>
+
+  <!-- step 7 write results -->
+  <rect x="490" y="462" width="210" height="72" rx="10" fill="#161b22" stroke="#2d333b"/>
+  <circle cx="512" cy="486" r="12" fill="#3fb950"/><text x="512" y="491" fill="#0d1117" font-size="13" font-weight="700" text-anchor="middle">7</text>
+  <text x="532" y="491" fill="#e6edf3" font-size="13" font-weight="600">write results</text>
+  <text x="595" y="514" fill="#9aa7b4" font-size="11.5" text-anchor="middle">status = success / error</text>
+
+  <line x1="250" y1="498" x2="268" y2="498" stroke="#7d8794" stroke-width="1.6" marker-end="url(#arw)"/>
+  <line x1="470" y1="498" x2="488" y2="498" stroke="#7d8794" stroke-width="1.6" marker-end="url(#arw)"/>
+
+  <!-- Redis -> worker dequeue -->
+  <path d="M860,332 C860,470 780,470 752,470" fill="none" stroke="#d29922" stroke-width="1.8" marker-end="url(#arw)" stroke-dasharray="6 4"/>
+  <text x="700" y="360" fill="#d29922" font-size="11.5">worker pulls job</text>
+
+  <!-- worker writes back to postgres -->
+  <path d="M700,478 C820,478 900,420 900,240" fill="none" stroke="#3fb950" stroke-width="1.8" marker-end="url(#arw)" stroke-dasharray="6 4"/>
+  <text x="812" y="400" fill="#3fb950" font-size="11.5">results → DB</text>
+
+  <!-- key takeaway -->
+  <rect x="30" y="566" width="920" height="40" rx="10" fill="#161b22" stroke="#2d333b"/>
+  <text x="50" y="591" fill="#e6edf3" font-size="13">
+    <tspan fill="#f85149" font-weight="700">Key:</tspan> the web node writes the DB record BEFORE running — and it never runs the workflow. OOM at step&#160;2 = crash before the write =
+    <tspan fill="#f85149" font-weight="700">nothing saved.</tspan>
+  </text>
+</svg>

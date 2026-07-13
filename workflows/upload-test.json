@@ -1,0 +1,38 @@
+{
+  "id": "uploadTestLab001",
+  "name": "upload-test",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "upload-test",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "b1c2d3e4-0001-0001-0001-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [400, 300],
+      "webhookId": "upload-test-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Report what the upload actually contained, so you can confirm from the\n// HTTP response that the file arrived (and is stored with the execution).\nconst item = $input.first();\nconst bin = item.binary || {};\nconst files = Object.entries(bin).map(([key, v]) => ({\n  key,\n  fileName: v.fileName,\n  mimeType: v.mimeType,\n  fileExtension: v.fileExtension,\n  fileSizeBytes: v.fileSize,\n}));\nreturn [{ json: { ok: true, receivedFiles: files.length, files } }];"
+      },
+      "id": "b1c2d3e4-0002-0002-0002-000000000002",
+      "name": "Describe Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Describe Upload", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}

@@ -29,7 +29,12 @@ x-n8n-env: &n8n-env
   N8N_DEFAULT_BINARY_DATA_MODE: default
   N8N_PAYLOAD_SIZE_MAX: ${N8N_PAYLOAD_SIZE_MAX}
   # 512 MB V8 heap cap on every n8n process.
-  NODE_OPTIONS: --max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}
+  #  --heapsnapshot-signal=SIGUSR2      → write a full heap snapshot on demand
+  #                                       (scripts/heap-snapshot.sh sends SIGUSR2)
+  #  --heapsnapshot-near-heap-limit=3   → auto-write a snapshot just before an OOM
+  #                                       (captures WHAT filled the heap at the crash;
+  #                                        inherited by the JS Task Runner children too)
+  NODE_OPTIONS: --max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE} --heapsnapshot-signal=SIGUSR2 --heapsnapshot-near-heap-limit=3
 
   # Silence the "permissions of n8n config file" warning on bind/volume.
   N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
@@ -45,6 +50,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Publish to the host so external GUI tools (DBeaver/TablePlus/pgAdmin) can
+    # connect. Host port 5433 (5432 is already used by another local Postgres);
+    # container still listens on 5432. Lab only — never expose Postgres in prod.
+    ports:
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -128,6 +138,46 @@ services:
       - "8080:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+  # ─────────── Realtime heap monitor (always on) ──────────────
+  # Scrapes both n8n nodes' /metrics (V8 heap, external) AND real container
+  # memory via the Docker socket. Live dashboard at http://localhost:8888.
+  # The container-RSS line is what reveals the worker's JS Task Runner OOM,
+  # which the heap metric alone cannot see.
+  heap-monitor:
+    image: python:3.12-slim
+    restart: unless-stopped
+    depends_on:
+      - n8n-main
+    environment:
+      MAIN_METRICS: http://n8n-main:5678/metrics
+      WORKER_METRICS: http://n8n-worker:5678/metrics
+      HEAP_CAP_MB: ${NODE_MAX_OLD_SPACE_SIZE}
+      MEM_LIMIT_MB: "1024"
+    volumes:
+      - ./monitoring/heap-monitor:/app:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    working_dir: /app
+    command: ["python", "server.py"]
+    ports:
+      - "8888:8888"
+
+  # ─────────── Periodic-restart recycler (EXAMPLE — commented) ──
+  # V8 does not return the high-water-mark heap to the OS on idle (see the
+  # memory-lifecycle report). For 24/7 runs, recycling the process on a
+  # schedule keeps RSS from parking at its peak. Uncomment to enable a
+  # restart every 6h. Needs the docker socket. Prefer this only if you
+  # cannot keep the high-water mark low via off-heap binary + size limits.
+  #
+  # recycler:
+  #   image: docker:cli
+  #   restart: unless-stopped
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   entrypoint: ["/bin/sh","-c"]
+  #   command:
+  #     - "while true; do sleep 21600; \
+  #        docker restart n8n-poc-issues-n8n-main-1 n8n-poc-issues-n8n-worker-1; done"
 
   # ─────────── Monitoring (optional: --profile monitoring) ─────
   prometheus:

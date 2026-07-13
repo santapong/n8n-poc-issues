@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 660" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#7d8794"/></marker>
+    <marker id="ag" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3fb950"/></marker>
+    <linearGradient id="hdr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1c2230"/><stop offset="1" stop-color="#0d1117"/></linearGradient>
+  </defs>
+  <rect width="980" height="660" fill="#0d1117"/>
+  <text x="40" y="46" fill="#e6edf3" font-size="24" font-weight="700">Manual run vs Production run — where do the files go?</text>
+  <text x="40" y="70" fill="#9aa7b4" font-size="14">Binary storage mode = <tspan fill="#4f9dff" font-weight="700">database</tspan> (your setting). Files stream to the DB as bytea — the heap stays flat.</text>
+
+  <!-- ============ MANUAL RUN ============ -->
+  <rect x="30" y="96" width="920" height="230" rx="14" fill="url(#hdr)" stroke="#4f9dff" stroke-width="1.6"/>
+  <text x="50" y="124" fill="#4f9dff" font-size="16" font-weight="700">① MANUAL run  ("Execute Workflow" in the editor)</text>
+  <text x="50" y="145" fill="#9aa7b4" font-size="12.5">Runs on the WEB NODE (n8n-main). The file's bytes transit main's memory — but are STORED in the database.</text>
+
+  <!-- editor -->
+  <rect x="50" y="170" width="130" height="70" rx="10" fill="#161b22" stroke="#2d333b"/>
+  <text x="115" y="200" fill="#e6edf3" font-size="13" font-weight="600" text-anchor="middle">Editor UI</text>
+  <text x="115" y="219" fill="#9aa7b4" font-size="11" text-anchor="middle">you click</text>
+  <text x="115" y="233" fill="#9aa7b4" font-size="11" text-anchor="middle">Execute Workflow</text>
+
+  <!-- main executes -->
+  <rect x="240" y="160" width="250" height="120" rx="10" fill="#161b22" stroke="#4f9dff" stroke-width="1.6"/>
+  <text x="365" y="186" fill="#4f9dff" font-size="13.5" font-weight="700" text-anchor="middle">n8n-main · WEB NODE</text>
+  <text x="365" y="206" fill="#e6edf3" font-size="12" text-anchor="middle">runs the workflow itself</text>
+  <text x="365" y="228" fill="#9aa7b4" font-size="11.5" text-anchor="middle">file bytes pass THROUGH its memory</text>
+  <text x="365" y="245" fill="#3fb950" font-size="11.5" text-anchor="middle">(database mode → heap stays flat ~145 MB)</text>
+  <text x="365" y="266" fill="#9aa7b4" font-size="11" text-anchor="middle">it is the executor, not the store</text>
+
+  <!-- DB -->
+  <rect x="560" y="150" width="180" height="86" rx="12" fill="#161b22" stroke="#3fb950" stroke-width="1.6"/>
+  <text x="650" y="178" fill="#3fb950" font-size="14" font-weight="700" text-anchor="middle">Postgres — the STORE</text>
+  <text x="650" y="200" fill="#9aa7b4" font-size="11" text-anchor="middle">binary_data (bytea) = the file</text>
+  <text x="650" y="216" fill="#9aa7b4" font-size="11" text-anchor="middle">execution_data = tiny reference</text>
+
+  <!-- disk note -->
+  <rect x="560" y="250" width="360" height="58" rx="10" fill="none" stroke="#2d333b" stroke-dasharray="4 3"/>
+  <text x="575" y="272" fill="#9aa7b4" font-size="11.5">Other modes for the same file:</text>
+  <text x="575" y="290" fill="#9aa7b4" font-size="11.5">• filesystem → a file on disk   • s3 → object storage   • default → base64 INLINE (heap spike)</text>
+
+  <line x1="180" y1="205" x2="238" y2="205" stroke="#7d8794" stroke-width="1.6" marker-end="url(#a)"/>
+  <line x1="490" y1="200" x2="558" y2="195" stroke="#3fb950" stroke-width="1.8" marker-end="url(#ag)"/>
+  <text x="505" y="185" fill="#3fb950" font-size="11">store file</text>
+
+  <!-- ============ PRODUCTION RUN ============ -->
+  <rect x="30" y="350" width="920" height="230" rx="14" fill="url(#hdr)" stroke="#d29922" stroke-width="1.6"/>
+  <text x="50" y="378" fill="#d29922" font-size="16" font-weight="700">② PRODUCTION run  (webhook / active trigger / OneDrive node)</text>
+  <text x="50" y="399" fill="#9aa7b4" font-size="12.5">Runs on the WORKER, not main. Main only receives &amp; enqueues; the worker executes and the file transits the WORKER's memory.</text>
+
+  <rect x="50" y="424" width="120" height="66" rx="10" fill="#161b22" stroke="#2d333b"/>
+  <text x="110" y="452" fill="#e6edf3" font-size="12.5" font-weight="600" text-anchor="middle">webhook /</text>
+  <text x="110" y="469" fill="#e6edf3" font-size="12.5" font-weight="600" text-anchor="middle">trigger</text>
+
+  <rect x="200" y="424" width="150" height="66" rx="10" fill="#161b22" stroke="#2d333b"/>
+  <text x="275" y="450" fill="#e6edf3" font-size="12.5" font-weight="600" text-anchor="middle">n8n-main</text>
+  <text x="275" y="468" fill="#9aa7b4" font-size="11" text-anchor="middle">ingest + enqueue only</text>
+  <text x="275" y="482" fill="#9aa7b4" font-size="11" text-anchor="middle">(does NOT execute)</text>
+
+  <rect x="380" y="424" width="110" height="66" rx="10" fill="#161b22" stroke="#2d333b"/>
+  <text x="435" y="452" fill="#e6edf3" font-size="12.5" font-weight="600" text-anchor="middle">Redis</text>
+  <text x="435" y="469" fill="#9aa7b4" font-size="11" text-anchor="middle">job queue</text>
+
+  <rect x="520" y="414" width="230" height="86" rx="10" fill="#161b22" stroke="#d29922" stroke-width="1.6"/>
+  <text x="635" y="440" fill="#d29922" font-size="13" font-weight="700" text-anchor="middle">n8n-worker · executes</text>
+  <text x="635" y="460" fill="#9aa7b4" font-size="11.5" text-anchor="middle">OneDrive download/upload runs HERE</text>
+  <text x="635" y="476" fill="#9aa7b4" font-size="11.5" text-anchor="middle">file transits the WORKER's memory</text>
+  <text x="635" y="492" fill="#f85149" font-size="11" text-anchor="middle">big file → worker heap/RSS pressure</text>
+
+  <rect x="790" y="422" width="150" height="70" rx="12" fill="#161b22" stroke="#3fb950" stroke-width="1.6"/>
+  <text x="865" y="452" fill="#3fb950" font-size="13" font-weight="700" text-anchor="middle">Postgres</text>
+  <text x="865" y="472" fill="#9aa7b4" font-size="11" text-anchor="middle">binary_data (bytea)</text>
+
+  <line x1="170" y1="457" x2="198" y2="457" stroke="#7d8794" stroke-width="1.6" marker-end="url(#a)"/>
+  <line x1="350" y1="457" x2="378" y2="457" stroke="#7d8794" stroke-width="1.6" marker-end="url(#a)"/>
+  <line x1="490" y1="457" x2="518" y2="457" stroke="#7d8794" stroke-width="1.6" marker-end="url(#a)"/>
+  <line x1="750" y1="457" x2="788" y2="457" stroke="#3fb950" stroke-width="1.8" marker-end="url(#ag)"/>
+
+  <!-- key -->
+  <rect x="30" y="600" width="920" height="42" rx="10" fill="#161b22" stroke="#2d333b"/>
+  <text x="50" y="626" fill="#e6edf3" font-size="13">
+    <tspan fill="#4f9dff" font-weight="700">Answer:</tspan> a MANUAL run executes on the <tspan fill="#4f9dff" font-weight="700">web node</tspan> — so the file passes through main's memory — but in
+    <tspan fill="#3fb950" font-weight="700">database mode it is STORED in Postgres</tspan> (binary_data), not kept on the web node.
+  </text>
+</svg>
